@@ -23,6 +23,7 @@ export const DEFAULTS = {
   cooldownMs: 8000, // silence after an alarm before it can fire again
   alarmSound: 'siren', // siren | beep | pulse | chime
   alarmVolume: 0.6, // 0..1
+  outputDeviceId: '', // '' = system default output; otherwise a mediaDevices id
   alarmMs: 4000, // how long one alarm lasts when it is not held
   holdUntilDismissed: false, // true = keep sounding until the user stops it
   notify: true, // also raise a desktop notification
@@ -73,6 +74,10 @@ export function sanitize(patch, base = DEFAULTS) {
   num('alarmMs', 500, 120000);
   num('analyzeFps', 1, 30);
   if (['siren', 'beep', 'pulse', 'chime'].includes(p.alarmSound)) s.alarmSound = p.alarmSound;
+  // Device ids are opaque strings from the browser; keep them bounded.
+  if (typeof p.outputDeviceId === 'string' && p.outputDeviceId.length <= 512) {
+    s.outputDeviceId = p.outputDeviceId;
+  }
   for (const key of ['holdUntilDismissed', 'notify', 'flashWindow', 'minimizeToTray', 'pixelExact']) {
     if (typeof p[key] === 'boolean') s[key] = p[key];
   }

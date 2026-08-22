@@ -100,6 +100,16 @@ function createWindow() {
   });
 
   installCaptureHandler();
+
+  // enumerateDevices() only labels audio outputs for a page that holds media
+  // permission, and without labels an output picker is a list of opaque ids.
+  // Granting it costs nothing here: the renderer has no getUserMedia call for a
+  // microphone, and screen capture still goes through the portal.
+  const ses = win.webContents.session;
+  ses.setPermissionRequestHandler((_wc, permission, callback) =>
+    callback(permission === 'media')
+  );
+  ses.setPermissionCheckHandler((_wc, permission) => permission === 'media');
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +188,7 @@ function registerIpc() {
     version: app.getVersion(),
     mock: MOCK,
     autoArm: process.env.NX_SENTRY_AUTOARM === '1',
+    demo: process.env.NX_SENTRY_DEMO || '',
     platform: process.platform,
     wayland: process.platform === 'linux' && !!process.env.WAYLAND_DISPLAY,
     configPath: config.configPath(),

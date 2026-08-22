@@ -94,6 +94,7 @@ export class Alarm {
     this.timer = null;
     this.playing = false;
     this.volume = 0.6;
+    this.outputId = ''; // '' = whatever the system default is
     this.onError = null;
   }
 
@@ -120,7 +121,35 @@ export class Alarm {
     }
     // Browsers start the context suspended until a gesture; arming is one.
     if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
+    if (this.outputId && this.ctx.sinkId !== this.outputId) this.setOutputDevice(this.outputId);
     return this.ctx;
+  }
+
+  /**
+   * Send the alarm to a specific output device rather than the system default.
+   *
+   * This is not a nicety: a machine whose real listening chain is an effects
+   * sink, a headset, or a capture interface will happily play an alarm into a
+   * device nobody is listening to, and the app looks broken while working
+   * perfectly. '' restores the system default.
+   */
+  async setOutputDevice(id) {
+    this.outputId = typeof id === 'string' ? id : '';
+    if (!this.ctx || typeof this.ctx.setSinkId !== 'function') return false;
+    try {
+      await this.ctx.setSinkId(this.outputId);
+      return true;
+    } catch (err) {
+      // A device that has been unplugged since it was chosen ends up here.
+      this.onError?.(err);
+      return false;
+    }
+  }
+
+  /** Whether this build can route audio at all (Chromium 110+ / Electron 22+). */
+  get canRoute() {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    return !!Ctx && typeof Ctx.prototype.setSinkId === 'function';
   }
 
   setVolume(v) {
@@ -207,6 +236,7 @@ export class Alarm {
     }
     return {
       ok: ctx.state === 'running' && peak > 0.01,
+      sinkId: typeof ctx.sinkId === 'string' ? ctx.sinkId : '',
       reason: ctx.state !== 'running' ? 'suspended' : peak > 0.01 ? 'ok' : 'silent',
       state: ctx.state,
       peak: Number(peak.toFixed(3)),

@@ -233,8 +233,31 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focu
 .toggle input:checked + .box svg { opacity: 1; }
 .toggle input:focus-visible + .box { box-shadow: var(--focus-ring); }
 
+select {
+  font: inherit; color: var(--text); width: 100%; cursor: pointer;
+  padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--well-deep); border: 1px solid var(--line);
+  transition: border-color var(--dur-fast) var(--ease-soft), box-shadow var(--dur-fast) var(--ease-soft);
+}
+select:hover { border-color: rgba(154, 60, 255, 0.5); }
+select:focus-visible { outline: none; border-color: var(--violet); box-shadow: var(--focus-ring); }
+select option { background: #171028; color: var(--text); }
+
 /* --------------------------------------------------------------- the stage */
 .stage-wrap { position: relative; background: var(--well-deep); border-radius: var(--radius-sm); padding: var(--sp-1); }
+/* Zoom scales the stage inside a scrolling well; the region is positioned in
+   percentages, so it scales with it and the pointer maths stays untouched. */
+.stage-viewport { overflow: auto; max-height: 64vh; border-radius: var(--radius-xs); }
+.stage-viewport .stage { width: calc(100% * var(--zoom, 1)); }
+.stage-viewport.panning { cursor: grabbing; }
+
+/* the magnifier: real pixels, no smoothing, so a 1px target is selectable */
+.loupe {
+  position: absolute; z-index: 3; width: 150px; height: 150px; pointer-events: none;
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), 0 0 0 1px rgba(154, 60, 255, 0.7);
+  image-rendering: pixelated;
+}
 .stage {
   position: relative; width: 100%; aspect-ratio: 16 / 9;
   background: #05030c; border-radius: var(--radius-xs); overflow: hidden;

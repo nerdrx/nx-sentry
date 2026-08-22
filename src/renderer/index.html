@@ -46,6 +46,7 @@
       <section class="card" id="watchCard">
         <h2>Watch area</h2>
         <div class="stage-wrap">
+          <div class="stage-viewport" id="viewport">
           <div class="stage" id="stage">
             <video id="video" autoplay muted playsinline></video>
             <div class="scrim" id="scrim">
@@ -62,6 +63,15 @@
               <div class="blob" id="blob" hidden></div>
             </div>
           </div>
+          </div>
+          <canvas class="loupe" id="loupe" width="150" height="150" hidden></canvas>
+        </div>
+        <div class="row mt-2">
+          <button id="zoomOut" title="Zoom out (Ctrl+scroll on the preview)">−</button>
+          <span class="val mono" id="zoomVal">100%</span>
+          <button id="zoomIn" title="Zoom in (Ctrl+scroll on the preview)">+</button>
+          <button id="zoomFit">Fit</button>
+          <span class="muted small" id="regionOrigin"></span>
         </div>
         <div class="row mt-2">
           <button id="btnWhole">Whole screen</button>
@@ -69,7 +79,7 @@
           <span class="muted small" id="sourceName">No source</span>
         </div>
         <hr class="hairline" />
-        <p class="hint" id="watchHint">Drag on the preview to draw the area. Drag inside it to move it, or grab a corner to resize.</p>
+        <p class="hint" id="watchHint">Drag on the preview to draw the area, drag inside it to move it, or grab a corner to resize. For small targets: zoom in (Ctrl+scroll), watch the magnifier while you drag, and nudge with the arrow keys — 1 pixel at a time, or hold Shift to resize the edge instead.</p>
       </section>
 
       <section class="card">
@@ -145,6 +155,10 @@
           <label class="field">
             <span class="lbl">Volume <span class="val" id="volVal">60%</span></span>
             <input type="range" id="vol" min="0" max="100" step="1" />
+          </label>
+          <label class="field">
+            <span class="lbl">Play the alarm on <span class="val" id="outDevNote"></span></span>
+            <select id="outDev"><option value="">System default output</option></select>
           </label>
           <label class="field" id="alarmMsField">
             <span class="lbl">Alarm length <span class="val" id="lenVal">4s</span></span>

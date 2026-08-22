@@ -28,6 +28,14 @@ pixel.*
 - **Sound an alarm when it moves.** Four synthesised alarms — siren, beep,
   pulse, chime — with a volume you control, plus an optional desktop
   notification and a taskbar flash.
+- **Play it where you are listening.** Pick the output device the alarm uses,
+  independently of the system default — the alarm can go to your speakers while
+  a game holds your headset, or into the effects sink your desktop actually
+  routes through. **Sound check** plays a bar, measures what left the audio
+  graph, and names the device it went to.
+- **Select small things precisely.** Zoom the preview up to 16×, watch a
+  pixel-exact magnifier while you drag, and nudge the rectangle a single screen
+  pixel at a time with the arrow keys.
 - **Watch literal pixels when you need to.** A sensitivity multiplier up to
   ×1000 takes the thresholds down to "any change at all", and pixel-exact mode
   drops the downscaling entirely — the region is analysed 1:1 and compared
@@ -64,6 +72,13 @@ git clone https://github.com/nerdrx/nx-sentry && cd nx-sentry && npm install && 
 3. **Start watching.** You get a grace period (3 seconds by default) to get your
    hands off the mouse, then the sentry is live.
 
+For a small target — a status dot, a single row, a health bar — zoom in with
+`Ctrl`+scroll (or the `+` button), pan by dragging with the middle mouse button,
+and watch the magnifier that follows the cursor: it shows the source frame's
+real pixels at 10× with a crosshair on the exact pixel under the pointer. Arrow
+keys move the rectangle one screen pixel at a time, `Shift`+arrows resize its
+far edge, and `Alt` makes either jump ten.
+
 `Space` arms and disarms, `Esc` silences a sounding alarm, and the tray menu can
 do both without opening the window.
 
@@ -82,14 +97,22 @@ do both without opening the window.
 
 ### If you cannot hear the alarm
 
-Press **Sound check** in the Alarm panel. It plays one bar and measures what
-actually came out of the audio graph, then tells you which of the three silent
-failures you have: a suspended audio engine (click the window once), a graph
-that produced no signal (the app's own level in the system volume mixer), or
-sound that is working and going to a device you are not listening to (the system
-default output). The app also warns you the moment an alarm fires while its
-audio engine cannot sound, rather than looking like it is watching when it has
-gone mute.
+Press **Sound check** in the Alarm panel. It plays one bar, measures what
+actually came out of the audio graph, and names the device it went to, which
+separates the three silent failures: a suspended audio engine (click the window
+once), a graph producing no signal (raise the volume, check the app's level in
+the system mixer), or sound that is working and going somewhere you are not
+listening.
+
+That last one is the common case on Linux, and it is not a bug in either place:
+if your desktop routes what you hear through an effects sink (EasyEffects,
+Carla, a virtual mixer) while the *system default* output is the raw device,
+every app that just opens the default plays where you cannot hear it. Choose
+that sink under **Play the alarm on**, and the alarm follows you rather than the
+default.
+
+The app also warns you the moment an alarm fires while its audio engine cannot
+sound, rather than looking like it is watching when it has gone mute.
 
 If your own mouse pointer keeps tripping it, the capture includes the cursor:
 either lower the sensitivity, or draw the area somewhere the pointer does not go.

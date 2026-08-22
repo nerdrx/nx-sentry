@@ -27,6 +27,9 @@ for (const name of SOUNDS) {
 const a = new Alarm();
 const ctx = a.ensure();
 lines.push(`LIVE ctx=${ctx ? ctx.state : 'null'} sampleRate=${ctx ? ctx.sampleRate : '-'}`);
+const devs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'audiooutput');
+lines.push(`OUTPUTS ${devs.length}: ` + devs.map(d => `${d.label || '(unlabelled)'} [${d.deviceId.slice(0,8)}]`).join(' | '));
+lines.push(`canRoute=${a.canRoute}`);
 const check = await a.check('beep', 1);
 lines.push(`CHECK ${JSON.stringify(check)}`);
 lines.push(`READY ${a.ready}`);

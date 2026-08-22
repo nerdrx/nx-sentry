@@ -431,6 +431,125 @@ function toast(message, kind = '') {
 }
 
 // ---------------------------------------------------------------------------
+// Zoom, panning and the magnifier
+// ---------------------------------------------------------------------------
+
+let zoom = 1;
+const ZOOM_MIN = 1;
+const ZOOM_MAX = 16;
+
+/**
+ * Scale the preview, keeping a point fixed under the cursor.
+ *
+ * Selecting a 3-pixel target on a 4K screen shown in a 700px preview is
+ * hopeless at 1:1 — one preview pixel covers six screen pixels, so the
+ * rectangle can only ever be approximate. Zooming is what makes the region
+ * selectable at the resolution the detector actually samples.
+ */
+function setZoom(next, anchor) {
+  const vp = $('viewport');
+  const prev = zoom;
+  zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+  // Where the anchor sits in content coordinates, before and after: keeping it
+  // still is the difference between zooming and losing your place.
+  const a = anchor || { x: vp.clientWidth / 2, y: vp.clientHeight / 2 };
+  const cx = (vp.scrollLeft + a.x) / prev;
+  const cy = (vp.scrollTop + a.y) / prev;
+  vp.style.setProperty('--zoom', zoom);
+  vp.scrollLeft = cx * zoom - a.x;
+  vp.scrollTop = cy * zoom - a.y;
+  $('zoomVal').textContent = `${Math.round(zoom * 100)}%`;
+  layoutRegion();
+}
+
+function setupZoom() {
+  const vp = $('viewport');
+  $('zoomIn').addEventListener('click', () => setZoom(zoom * 1.5));
+  $('zoomOut').addEventListener('click', () => setZoom(zoom / 1.5));
+  $('zoomFit').addEventListener('click', () => setZoom(1));
+
+  vp.addEventListener(
+    'wheel',
+    (e) => {
+      if (!e.ctrlKey) return; // plain scrolling still pans the well
+      e.preventDefault();
+      const b = vp.getBoundingClientRect();
+      setZoom(zoom * (e.deltaY < 0 ? 1.25 : 1 / 1.25), { x: e.clientX - b.left, y: e.clientY - b.top });
+    },
+    { passive: false }
+  );
+
+  // Middle-drag pans, which beats hunting for scrollbars while zoomed in.
+  let pan = null;
+  vp.addEventListener('pointerdown', (e) => {
+    if (e.button !== 1) return;
+    pan = { x: e.clientX, y: e.clientY, left: vp.scrollLeft, top: vp.scrollTop };
+    vp.classList.add('panning');
+    vp.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  vp.addEventListener('pointermove', (e) => {
+    if (!pan) return;
+    vp.scrollLeft = pan.left - (e.clientX - pan.x);
+    vp.scrollTop = pan.top - (e.clientY - pan.y);
+  });
+  const endPan = () => {
+    pan = null;
+    vp.classList.remove('panning');
+  };
+  vp.addEventListener('pointerup', endPan);
+  vp.addEventListener('pointercancel', endPan);
+}
+
+/**
+ * Draw the magnifier: the source frame's real pixels around the pointer, at 10×
+ * with smoothing off, plus a crosshair. This is what makes a 1-pixel target
+ * selectable — the preview is scaled, the loupe never is.
+ */
+const LOUPE_SPAN = 15; // source pixels across the glass
+function showLoupe(clientX, clientY, nx, ny) {
+  const video = $('video');
+  const loupe = $('loupe');
+  if (!video.videoWidth) return;
+  const ctx = loupe.getContext('2d');
+  const sx = nx * video.videoWidth - LOUPE_SPAN / 2;
+  const sy = ny * video.videoHeight - LOUPE_SPAN / 2;
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, loupe.width, loupe.height);
+  try {
+    ctx.drawImage(video, sx, sy, LOUPE_SPAN, LOUPE_SPAN, 0, 0, loupe.width, loupe.height);
+  } catch {
+    return;
+  }
+  const mid = loupe.width / 2;
+  ctx.strokeStyle = 'rgba(0, 229, 255, 0.9)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(mid, 0);
+  ctx.lineTo(mid, loupe.height);
+  ctx.moveTo(0, mid);
+  ctx.lineTo(loupe.width, mid);
+  ctx.stroke();
+  // the single source pixel under the cursor
+  const cell = loupe.width / LOUPE_SPAN;
+  ctx.strokeStyle = 'rgba(255, 179, 0, 0.95)';
+  ctx.strokeRect(mid - cell / 2, mid - cell / 2, cell, cell);
+
+  const wrap = loupe.parentElement; // .stage-wrap, the loupe's positioning box
+  const b = wrap.getBoundingClientRect();
+  // Keep the glass beside the cursor and inside the card.
+  const left = Math.min(Math.max(clientX - b.left + 24, 0), b.width - loupe.width);
+  const top = Math.min(Math.max(clientY - b.top - loupe.height - 16, 0), b.height - loupe.height);
+  loupe.style.left = `${left}px`;
+  loupe.style.top = `${top}px`;
+  loupe.hidden = false;
+}
+
+function hideLoupe() {
+  $('loupe').hidden = true;
+}
+
+// ---------------------------------------------------------------------------
 // The region rectangle
 // ---------------------------------------------------------------------------
 
@@ -446,6 +565,9 @@ function layoutRegion() {
     ? `${Math.round(r.w * v.videoWidth)}×${Math.round(r.h * v.videoHeight)} px`
     : `${Math.round(r.w * 100)}% × ${Math.round(r.h * 100)}%`;
   $('regionTag').textContent = px;
+  $('regionOrigin').textContent = v.videoWidth
+    ? `top-left at ${Math.round(r.x * v.videoWidth)}, ${Math.round(r.y * v.videoHeight)} px of ${v.videoWidth}×${v.videoHeight}`
+    : '';
 }
 
 function setupRegionEditing() {
@@ -478,8 +600,10 @@ function setupRegionEditing() {
   });
 
   stage.addEventListener('pointermove', (e) => {
+    const hover = pointAt(e);
+    if (stream) showLoupe(e.clientX, e.clientY, hover.x, hover.y);
     if (!drag) return;
-    const p = pointAt(e);
+    const p = hover;
     const s = drag.start;
     let r;
     if (drag.mode === 'new') {
@@ -501,7 +625,10 @@ function setupRegionEditing() {
     layoutRegion();
   });
 
+  stage.addEventListener('pointerleave', hideLoupe);
+
   const end = () => {
+    hideLoupe();
     if (!drag) return;
     drag = null;
     patch({ region: settings.region }, { immediate: true });
@@ -650,6 +777,17 @@ function bindControls() {
 
   $('btnTest').addEventListener('click', () => alarm.test(settings.alarmSound, settings.alarmVolume));
   $('btnCheck').addEventListener('click', soundCheck);
+  $('outDev').addEventListener('change', async () => {
+    const id = $('outDev').value;
+    patch({ outputDeviceId: id }, { immediate: true });
+    alarm.ensure();
+    await alarm.setOutputDevice(id);
+    alarm.test(settings.alarmSound, settings.alarmVolume); // hear where it went
+  });
+  refreshOutputs();
+  // Devices come and go — a headset unplugged while the app runs must not leave
+  // a stale list, and a newly plugged one should be selectable without a restart.
+  navigator.mediaDevices?.addEventListener?.('devicechange', refreshOutputs);
   $('btnSource').addEventListener('click', pickSource);
   $('btnSourceEmpty').addEventListener('click', pickSource);
   $('btnTray').addEventListener('click', () => api.hideWindow());
@@ -666,6 +804,7 @@ function bindControls() {
   });
 
   document.addEventListener('keydown', (e) => {
+    if (nudgeRegion(e)) return;
     if (e.key === 'Escape' && gate.alarming) dismiss();
     if (e.code === 'Space' && !/INPUT|TEXTAREA|BUTTON/.test(document.activeElement?.tagName || '')) {
       e.preventDefault();
@@ -678,6 +817,45 @@ function bindControls() {
     else if (cmd === 'disarm') disarm();
     else if (cmd === 'dismiss') dismiss();
   });
+}
+
+/** Fill the output picker with the system's audio outputs, keeping the choice. */
+async function refreshOutputs() {
+  const sel = $('outDev');
+  if (!alarm.canRoute) {
+    // Without setSinkId the app cannot route anywhere but the default, and a
+    // dead control that silently does nothing is worse than none.
+    sel.disabled = true;
+    $('outDevNote').textContent = 'not supported by this build';
+    return;
+  }
+  let devices = [];
+  try {
+    devices = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput');
+  } catch {
+    /* keep the default-only list */
+  }
+  const chosen = settings.outputDeviceId || '';
+  sel.textContent = '';
+  const add = (value, label) => {
+    const o = document.createElement('option');
+    o.value = value;
+    o.textContent = label;
+    if (value === chosen) o.selected = true;
+    sel.append(o);
+  };
+  add('', 'System default output');
+  for (const d of devices) {
+    if (d.deviceId === 'default' || !d.deviceId) continue;
+    add(d.deviceId, d.label || `Output ${d.deviceId.slice(0, 6)}`);
+  }
+  // A device that has since been unplugged would otherwise vanish silently.
+  if (chosen && ![...sel.options].some((o) => o.value === chosen)) {
+    add(chosen, 'Saved device (not currently connected)');
+    sel.value = chosen;
+  }
+  $('outDevNote').textContent = devices.length ? '' : 'no devices listed';
+  await alarm.setOutputDevice(chosen);
 }
 
 /**
@@ -697,7 +875,7 @@ async function soundCheck() {
     $('soundHint').classList.toggle('warn', warn);
     $('soundHint').textContent =
       r.reason === 'ok'
-        ? `Sound is working — peak ${r.peak} at ${Math.round(r.sampleRate / 1000)}kHz. If you did not hear it, check which output device is the system default and the app's own level in the volume mixer.`
+        ? `Sound is working — peak ${r.peak} at ${Math.round(r.sampleRate / 1000)}kHz, playing on ${outputLabel(r.sinkId)}. If you did not hear it, that device is not the one you are listening to: pick another above.`
         : r.reason === 'suspended'
           ? 'The browser audio engine is suspended, so alarms are silent. Click anywhere in this window, then run the check again.'
           : r.reason === 'no-audio'
@@ -707,6 +885,45 @@ async function soundCheck() {
   } finally {
     btn.disabled = false;
   }
+}
+
+function outputLabel(sinkId) {
+  const sel = $('outDev');
+  const opt = [...sel.options].find((o) => o.value === (sinkId || ''));
+  return opt ? opt.textContent : 'the system default output';
+}
+
+const ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+/**
+ * Move the region by one SOURCE pixel per key press (Shift resizes the far edge
+ * instead). Dragging can only ever be as precise as the preview's scale; this
+ * is exact at any zoom, which is what a small target needs.
+ */
+function nudgeRegion(e) {
+  const step = ARROWS[e.key];
+  if (!step || !stream) return false;
+  if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) return false;
+  const video = $('video');
+  if (!video.videoWidth) return false;
+  e.preventDefault();
+
+  const [dx, dy] = step;
+  const stepX = (dx * (e.altKey ? 10 : 1)) / video.videoWidth;
+  const stepY = (dy * (e.altKey ? 10 : 1)) / video.videoHeight;
+  const r = { ...settings.region };
+  if (e.shiftKey) {
+    r.w = Math.min(1 - r.x, Math.max(2 / video.videoWidth, r.w + stepX));
+    r.h = Math.min(1 - r.y, Math.max(2 / video.videoHeight, r.h + stepY));
+  } else {
+    r.x = Math.min(1 - r.w, Math.max(0, r.x + stepX));
+    r.y = Math.min(1 - r.h, Math.max(0, r.y + stepY));
+  }
+  settings.region = r;
+  resetBaseline();
+  layoutRegion();
+  patch({ region: r }, { immediate: true });
+  return true;
 }
 
 function showSensHint() {
@@ -784,6 +1001,7 @@ async function boot() {
   applySettings();
   bindControls();
   setupRegionEditing();
+  setupZoom();
   bindSheen();
   layoutRegion();
   showSensHint();
@@ -805,6 +1023,20 @@ async function boot() {
     // additionally arms the sentry so a screenshot can show the live states.
     await pickSource();
     if (info.autoArm) arm();
+    // Mock-only: let the headless harness photograph states a screenshot cannot
+    // reach on its own, since it has no pointer to drive. NX_SENTRY_DEMO=zoom=4
+    if (info.demo) {
+      const z = /zoom=([\d.]+)/.exec(info.demo);
+      if (z) setZoom(Number(z[1]));
+      if (/loupe/.test(info.demo)) {
+        const r = settings.region;
+        const b = $('stage').getBoundingClientRect();
+        setTimeout(
+          () => showLoupe(b.left + b.width * (r.x + r.w), b.top + b.height * (r.y + r.h), r.x + r.w, r.y + r.h),
+          400
+        );
+      }
+    }
   }
 }
 
