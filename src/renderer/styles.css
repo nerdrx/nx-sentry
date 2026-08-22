@@ -409,3 +409,70 @@ select option { background: #171028; color: var(--text); }
     transition-duration: 1ms !important;
   }
 }
+
+/* ------------------------------------------------------- ignored areas ---- */
+/* Motion inside these never counts. They read as "subtracted" rather than
+   "selected": muted, hatched, and clearly not the violet of the live region. */
+.exclusions { position: absolute; inset: 0; pointer-events: none; }
+.exclusion {
+  position: absolute; pointer-events: auto; cursor: move;
+  border: 1px dashed rgba(154, 143, 192, 0.9);
+  background: repeating-linear-gradient(135deg,
+    rgba(10, 7, 20, 0.62) 0 6px, rgba(30, 22, 52, 0.62) 6px 12px);
+  border-radius: var(--radius-xs);
+}
+.exclusion .x {
+  position: absolute; right: -9px; top: -9px; width: 18px; height: 18px;
+  padding: 0; line-height: 1; font-size: 13px; border-radius: var(--radius-xs);
+  background: rgba(20, 13, 36, 0.95); color: var(--muted);
+}
+.exclusion .x:hover { color: var(--text); background: rgba(255, 84, 112, 0.5); }
+.exclusion .grip {
+  position: absolute; right: -5px; bottom: -5px; width: 10px; height: 10px;
+  background: var(--muted); border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 2px; cursor: nwse-resize;
+}
+.stage.excluding { cursor: cell; }
+.stage.excluding .region { pointer-events: none; }
+
+/* ------------------------------------------------------ the log & shots --- */
+.log-row {
+  display: flex; align-items: center; gap: var(--sp-1); width: 100%;
+  padding: 6px var(--sp-1); font-size: 12px; text-align: left;
+  background: var(--well); border-radius: var(--radius-xs);
+}
+.log-row::before { content: none; }           /* no lit edge on a list row */
+.log-row:hover { background: rgba(255, 255, 255, 0.06); transform: none; }
+.log-row:disabled { opacity: 0.75; }
+.log-row .t { font-family: var(--mono); color: var(--cyan); flex: none; }
+.log-row .d { color: var(--muted); margin-left: auto; font-family: var(--mono); flex: none; }
+.log-row .thumb {
+  width: 44px; height: 28px; object-fit: cover; flex: none;
+  border-radius: 2px; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+.log li { background: none; padding: 0; margin-bottom: 5px; }
+
+/* the viewer: one big frame, stepped or played */
+.sheet.viewer { width: min(920px, 94vw); }
+.shot {
+  background: var(--well-deep); border-radius: var(--radius-sm); padding: var(--sp-1);
+  display: grid; place-items: center; min-height: 240px;
+}
+.shot img { max-width: 100%; max-height: 58vh; border-radius: var(--radius-xs); display: block; }
+.shot-cap {
+  display: flex; align-items: baseline; gap: var(--sp-1);
+  margin: var(--sp-2) 0; font-size: 13px;
+}
+.shot-cap b { font-family: var(--mono); color: var(--cyan); }
+.shot-cap span { color: var(--muted); }
+.viewer-bar { align-items: center; }
+
+/* camera tiles in the picker */
+.group-label {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--muted); margin: var(--sp-2) 0 var(--sp-1);
+}
+.cam-art {
+  aspect-ratio: 16 / 10; display: grid; place-items: center;
+  background: var(--well-deep); color: var(--violet-soft);
+}

@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('sentry', {
   setState: (state) => call('state.set', state),
   alert: (payload) => call('alert', payload),
   hideWindow: () => call('window.hide'),
+  snapshots: {
+    save: (payload) => call('snapshots.save', payload),
+    reveal: () => call('snapshots.reveal'),
+  },
   // Tray menu items arrive here: 'arm' | 'disarm' | 'dismiss'.
   onCommand: (fn) => {
     const listener = (_e, cmd) => fn(cmd);

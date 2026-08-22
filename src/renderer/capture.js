@@ -19,6 +19,46 @@ export async function startCapture(sourceId, api) {
   return stream;
 }
 
+/**
+ * The cameras this machine has. On Linux these come from V4L2 through
+ * Chromium's capture stack, so a UVC webcam, a capture card and a v4l2loopback
+ * device all appear the same way — no portal, no permission dialog per launch.
+ *
+ * Labels are only populated once the page holds a media permission, which is
+ * why main grants it; without one the browser returns anonymous entries and we
+ * number them instead of showing empty names.
+ */
+export async function listCameras() {
+  if (!navigator.mediaDevices?.enumerateDevices) return [];
+  let devices = [];
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return [];
+  }
+  return devices
+    .filter((d) => d.kind === 'videoinput')
+    .map((d, i) => ({
+      id: d.deviceId,
+      name: d.label || `Camera ${i + 1}`,
+      kind: 'camera',
+    }));
+}
+
+/**
+ * Open one camera. `exact` on the deviceId matters: without it the browser is
+ * free to hand back a different camera than the one that was picked, which on a
+ * machine with a webcam and a capture card is a coin toss.
+ */
+export async function startCamera(deviceId) {
+  return navigator.mediaDevices.getUserMedia({
+    video: deviceId
+      ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
+      : { width: { ideal: 1280 }, height: { ideal: 720 } },
+    audio: false,
+  });
+}
+
 /** A 1280×720 synthetic desktop: static chrome plus a shape that moves in bursts. */
 export function startMock() {
   const canvas = document.createElement('canvas');
@@ -70,4 +110,4 @@ export function startMock() {
   return canvas.captureStream(20);
 }
 
-export default { startCapture, startMock };
+export default { startCapture, startMock, listCameras, startCamera };

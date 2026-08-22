@@ -10,6 +10,7 @@ import {
   toGray,
   frameDiff,
   frameDiffRGBA,
+  buildMask,
   MotionGate,
   STATE,
 } from '../src/renderer/detector.js';
@@ -233,4 +234,72 @@ test('gate: a bare ratio still works and skips the pixel floor', () => {
   const g = new MotionGate({ minAreaPct: 1, minChangedPixels: 500, holdFrames: 1, warmupMs: 0 });
   g.arm(0);
   assert.equal(g.update(0.02, 10).fired, true, 'no pixel count reported, no floor applied');
+});
+
+// --------------------------------------------------------------------------
+// Ignored areas
+// --------------------------------------------------------------------------
+
+const FULL = { x: 0, y: 0, w: 1, h: 1 };
+
+test('buildMask projects frame rectangles onto the analysis grid', () => {
+  // The left half of the frame, on a 10×10 grid, is 50 cells.
+  const m = buildMask(10, 10, FULL, [{ x: 0, y: 0, w: 0.5, h: 1 }]);
+  assert.equal(m.ignored, 50);
+  assert.equal(m.unmasked, 50);
+  assert.equal(m.data[0], 1);
+  assert.equal(m.data[9], 0, 'the right half is untouched');
+});
+
+test('buildMask is relative to the region, not the frame', () => {
+  // Region is the right half; an ignore area covering the frame's right
+  // quarter therefore covers the region's right HALF.
+  const region = { x: 0.5, y: 0, w: 0.5, h: 1 };
+  const m = buildMask(10, 10, region, [{ x: 0.75, y: 0, w: 0.25, h: 1 }]);
+  assert.equal(m.ignored, 50);
+  assert.equal(m.data[0], 0, 'the region\'s left half still counts');
+  assert.equal(m.data[9], 1);
+});
+
+test('buildMask clips to the grid and never double-counts an overlap', () => {
+  const m = buildMask(10, 10, FULL, [
+    { x: -0.5, y: -0.5, w: 1, h: 1 }, // half outside the frame
+    { x: 0, y: 0, w: 0.5, h: 0.5 }, // entirely inside the first
+  ]);
+  assert.equal(m.ignored, 25, 'the overlap is counted once');
+  assert.equal(m.unmasked, 75);
+});
+
+test('buildMask returns null when there is nothing to ignore', () => {
+  assert.equal(buildMask(10, 10, FULL, []), null);
+  assert.equal(buildMask(10, 10, FULL, null), null);
+  // A rectangle entirely outside the region masks nothing, so: still null.
+  assert.equal(buildMask(10, 10, { x: 0, y: 0, w: 0.5, h: 1 }, [{ x: 0.8, y: 0, w: 0.1, h: 0.1 }]), null);
+});
+
+test('a masked pixel never counts as motion, in either diff', () => {
+  const mask = buildMask(10, 10, FULL, [{ x: 0, y: 0, w: 0.5, h: 0.5 }]); // top-left quarter
+  const a = gray(10, 10, 0);
+  const b = gray(10, 10, 0);
+  b[0] = 255; // inside the ignored area
+  b[99] = 255; // outside it
+  const d = frameDiff(a, b, 10, 10, 20, mask);
+  assert.equal(d.changed, 1);
+  assert.deepEqual(d.bbox, { x: 9, y: 9, w: 1, h: 1 }, 'the box ignores masked motion too');
+
+  const ra = new Uint8ClampedArray(400);
+  const rb = new Uint8ClampedArray(400);
+  rb[0] = 9; // masked
+  rb[396] = 9; // last pixel, unmasked
+  assert.equal(frameDiffRGBA(ra, rb, 10, 10, 0, mask).changed, 1);
+});
+
+test('the ratio is a share of what is actually watched', () => {
+  const mask = buildMask(10, 10, FULL, [{ x: 0, y: 0, w: 0.5, h: 1 }]); // half ignored
+  const a = gray(10, 10, 0);
+  const b = gray(10, 10, 0);
+  b[9] = 255;
+  const d = frameDiff(a, b, 10, 10, 20, mask);
+  assert.equal(d.total, 50, 'the denominator drops the ignored pixels');
+  assert.ok(Math.abs(d.ratio - 1 / 50) < 1e-9, 'not 1/100 — that would understate it');
 });

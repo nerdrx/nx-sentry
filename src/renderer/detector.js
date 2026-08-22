@@ -72,15 +72,18 @@ export function toGray(rgba, out) {
  * the movement in buffer coordinates (null when nothing moved) — the UI draws
  * that box on the preview so you can see WHAT tripped the alarm.
  */
-export function frameDiff(prev, curr, width, height, pixelThreshold) {
-  const total = width * height;
-  if (!prev || !curr || prev.length !== curr.length || curr.length !== total) {
+export function frameDiff(prev, curr, width, height, pixelThreshold, mask = null) {
+  const size = width * height;
+  const total = mask ? mask.unmasked : size;
+  if (!prev || !curr || prev.length !== curr.length || curr.length !== size) {
     return { changed: 0, total, ratio: 0, bbox: null };
   }
+  const skip = mask?.data ?? null;
   let changed = 0;
   let minX = width, minY = height, maxX = -1, maxY = -1;
   for (let y = 0, i = 0; y < height; y++) {
     for (let x = 0; x < width; x++, i++) {
+      if (skip && skip[i]) continue;
       const d = curr[i] - prev[i];
       if ((d < 0 ? -d : d) > pixelThreshold) {
         changed++;
@@ -109,14 +112,17 @@ export function frameDiff(prev, curr, width, height, pixelThreshold) {
  * difference of one unit in any channel counts. Alpha is ignored — a capture
  * stream is opaque, and a compositor writing 254 there is not motion.
  */
-export function frameDiffRGBA(prev, curr, width, height, threshold = 0) {
-  const total = width * height;
-  if (!prev || !curr || prev.length !== curr.length || curr.length !== total * 4) {
+export function frameDiffRGBA(prev, curr, width, height, threshold = 0, mask = null) {
+  const size = width * height;
+  const total = mask ? mask.unmasked : size;
+  if (!prev || !curr || prev.length !== curr.length || curr.length !== size * 4) {
     return { changed: 0, total, ratio: 0, bbox: null };
   }
+  const skip = mask?.data ?? null;
   let changed = 0;
   let minX = width, minY = height, maxX = -1, maxY = -1;
-  for (let i = 0, j = 0; i < total; i++, j += 4) {
+  for (let i = 0, j = 0; i < size; i++, j += 4) {
+    if (skip && skip[i]) continue;
     const dr = curr[j] - prev[j];
     const dg = curr[j + 1] - prev[j + 1];
     const db = curr[j + 2] - prev[j + 2];
@@ -137,6 +143,47 @@ export function frameDiffRGBA(prev, curr, width, height, threshold = 0) {
     ratio: total ? changed / total : 0,
     bbox: maxX < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
   };
+}
+
+/**
+ * Build the ignore mask for one analysis buffer.
+ *
+ * Ignore areas are stored in FRAME coordinates, not region coordinates, so they
+ * stay pinned to the thing they cover — a timestamp burnt into a camera image,
+ * a clock, a tree in the corner of the garden — while the watched rectangle is
+ * moved or resized around them. Here they are projected into the analysis
+ * buffer's grid and clipped to it.
+ *
+ * Returns null when nothing is masked, so the diff loops keep their fast path,
+ * and `{ data, unmasked, ignored }` otherwise. `unmasked` becomes the diff's
+ * denominator: a percentage of an area you have declared irrelevant is a lie.
+ */
+export function buildMask(width, height, region, exclusions) {
+  if (!Array.isArray(exclusions) || !exclusions.length || !region) return null;
+  if (!(width > 0) || !(height > 0)) return null;
+  const data = new Uint8Array(width * height);
+  let ignored = 0;
+  for (const e of exclusions) {
+    if (!e || !Number.isFinite(e.x) || !Number.isFinite(e.y)) continue;
+    // frame → region → analysis grid
+    const x0 = Math.floor(((e.x - region.x) / region.w) * width);
+    const y0 = Math.floor(((e.y - region.y) / region.h) * height);
+    const x1 = Math.ceil(((e.x + e.w - region.x) / region.w) * width);
+    const y1 = Math.ceil(((e.y + e.h - region.y) / region.h) * height);
+    const left = clamp(x0, 0, width), right = clamp(x1, 0, width);
+    const top = clamp(y0, 0, height), bottom = clamp(y1, 0, height);
+    for (let y = top; y < bottom; y++) {
+      for (let x = left; x < right; x++) {
+        const i = y * width + x;
+        if (!data[i]) {
+          data[i] = 1;
+          ignored++; // counted once, so overlapping areas cannot double-count
+        }
+      }
+    }
+  }
+  if (!ignored) return null;
+  return { data, unmasked: width * height - ignored, ignored };
 }
 
 export const STATE = {
@@ -298,6 +345,7 @@ export default {
   toGray,
   frameDiff,
   frameDiffRGBA,
+  buildMask,
   MotionGate,
   STATE,
 };

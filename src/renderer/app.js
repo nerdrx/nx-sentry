@@ -9,11 +9,12 @@ import {
   toGray,
   frameDiff,
   frameDiffRGBA,
+  buildMask,
   MotionGate,
   STATE,
 } from './detector.js';
 import { Alarm } from './alarm.js';
-import { startCapture, startMock } from './capture.js';
+import { startCapture, startMock, listCameras, startCamera } from './capture.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -63,6 +64,8 @@ let hasExactBaseline = false;
 let blobTimer = null;
 let lastAnalysis = { aw: 0, ah: 0, sw: 0, sh: 0, exact: false, capped: false };
 let sampleCostMs = 0; // EMA of what one sample costs, in ms
+let mask = null;      // ignore-area mask for the current analysis grid
+let maskKey = '';     // what that mask was built from
 
 // Pixel-exact analysis reads and diffs every pixel of the region, so the cost
 // is linear in its area. Past this many pixels a sample would not finish inside
@@ -106,7 +109,7 @@ function applySettings() {
 // Capture
 // ---------------------------------------------------------------------------
 
-async function useStream(next) {
+async function useStream(next, { kind = 'screen' } = {}) {
   stopStream();
   stream = next;
   const video = $('video');
@@ -121,7 +124,12 @@ async function useStream(next) {
   track.addEventListener('ended', () => {
     // The portal was revoked, or the shared window closed. Stop pretending to
     // watch: an armed sentry with a dead stream is worse than no sentry.
-    toast('The screen share ended, so watching stopped.', 'error');
+    toast(
+      kind === 'camera'
+        ? 'The camera stopped, so watching stopped.'
+        : 'The screen share ended, so watching stopped.',
+      'error'
+    );
     disarm();
     stopStream();
     $('scrim').classList.remove('hidden');
@@ -137,6 +145,7 @@ async function useStream(next) {
   };
   video.addEventListener('loadedmetadata', sizeStage);
   sizeStage();
+  layoutExclusions();
   restartSampling({ force: true });
 }
 
@@ -201,6 +210,14 @@ function sample() {
   }
   lastAnalysis = { aw, ah, sw, sh, exact, capped: exact && scale < 1 };
 
+  // Rebuilding the mask costs a pass over the buffer, so it happens only when
+  // the grid or the rectangles it is drawn from actually change.
+  const key = `${aw}x${ah}|${JSON.stringify(settings.region)}|${JSON.stringify(settings.exclusions)}`;
+  if (key !== maskKey) {
+    maskKey = key;
+    mask = buildMask(aw, ah, settings.region, settings.exclusions);
+  }
+
   const t0 = performance.now();
   let data;
   try {
@@ -216,14 +233,14 @@ function sample() {
     // persistent copy rather than a kept reference — one memcpy, no per-frame
     // allocation of a multi-megabyte array.
     diff = hasExactBaseline
-      ? frameDiffRGBA(prevRGBA, data, aw, ah, params.pixelThreshold)
-      : { changed: 0, total: aw * ah, ratio: 0, bbox: null };
+      ? frameDiffRGBA(prevRGBA, data, aw, ah, params.pixelThreshold, mask)
+      : { changed: 0, total: mask ? mask.unmasked : aw * ah, ratio: 0, bbox: null };
     prevRGBA.set(data);
     hasExactBaseline = true;
     prevGray = null;
   } else {
     const curr = toGray(data, useA ? bufA : bufB);
-    diff = frameDiff(prevGray, curr, aw, ah, params.pixelThreshold);
+    diff = frameDiff(prevGray, curr, aw, ah, params.pixelThreshold, mask);
     prevGray = curr;
     useA = !useA;
     hasExactBaseline = false;
@@ -237,7 +254,7 @@ function sample() {
 
   const snap = gate.update(diff, performance.now());
   paint(snap, diff, { aw, ah });
-  if (snap.fired) onMotion(snap, diff);
+  if (snap.fired) onMotion(snap, diff, { aw, ah });
 }
 
 // ---------------------------------------------------------------------------
@@ -266,7 +283,9 @@ function dismiss() {
   paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
 }
 
-function onMotion(snap, diff) {
+function onMotion(snap, diff, dims) {
+  // Before anything slow: the picture must come from the frame that fired.
+  const shot = takeSnapshot(diff, dims);
   alarm.start(settings.alarmSound, {
     volume: settings.alarmVolume,
     durationMs: settings.alarmMs,
@@ -283,8 +302,192 @@ function onMotion(snap, diff) {
     body: `${diff.changed ?? 0} pixels (${share}%) of the watched area changed.`,
     show: false,
   });
-  logEvent(new Date(), diff.ratio);
-  showBanner(new Date(), diff.ratio);
+  logEvent(shot?.at ?? new Date(), diff, shot);
+  showBanner(shot?.at ?? new Date(), diff.ratio);
+}
+
+// ---------------------------------------------------------------------------
+// Trigger snapshots — the evidence
+// ---------------------------------------------------------------------------
+
+// "Something moved" is not an answer when you were not in the room. Every
+// trigger keeps a picture of the watched area at the moment it fired, with the
+// moving part outlined, so the log can say WHAT moved and not just when.
+const snaps = [];
+const snapCanvas = document.createElement('canvas');
+const SNAP_MAX = 720; // long edge of a kept image
+
+/**
+ * Grab the watched region at the moment of the trigger and outline what moved.
+ * JPEG at 0.82: a few tens of kilobytes each, which is what makes keeping two
+ * dozen of them in memory unremarkable.
+ */
+function takeSnapshot(diff, dims) {
+  const video = $('video');
+  if (!video.videoWidth || !settings.keepSnapshots) return null;
+  const r = settings.region;
+  const sw = Math.max(2, Math.round(r.w * video.videoWidth));
+  const sh = Math.max(2, Math.round(r.h * video.videoHeight));
+  const k = Math.min(1, SNAP_MAX / Math.max(sw, sh));
+  const w = Math.max(16, Math.round(sw * k));
+  const h = Math.max(16, Math.round(sh * k));
+  snapCanvas.width = w;
+  snapCanvas.height = h;
+  const ctx = snapCanvas.getContext('2d');
+  try {
+    ctx.drawImage(video, Math.round(r.x * video.videoWidth), Math.round(r.y * video.videoHeight), sw, sh, 0, 0, w, h);
+  } catch {
+    return null; // a frame we cannot read is not worth failing the alarm over
+  }
+  // The ignored areas, so a picture explains why a moving thing did not count.
+  for (const e of settings.exclusions || []) {
+    const ex = ((e.x - r.x) / r.w) * w;
+    const ey = ((e.y - r.y) / r.h) * h;
+    const ew = (e.w / r.w) * w;
+    const eh = (e.h / r.h) * h;
+    ctx.fillStyle = 'rgba(4, 2, 10, 0.55)';
+    ctx.fillRect(ex, ey, ew, eh);
+    ctx.strokeStyle = 'rgba(154, 143, 192, 0.9)';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 1;
+    ctx.strokeRect(ex + 0.5, ey + 0.5, ew - 1, eh - 1);
+    ctx.setLineDash([]);
+  }
+  if (diff.bbox && dims) {
+    ctx.strokeStyle = '#ffb300';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(
+      (diff.bbox.x / dims.aw) * w,
+      (diff.bbox.y / dims.ah) * h,
+      (diff.bbox.w / dims.aw) * w,
+      (diff.bbox.h / dims.ah) * h
+    );
+  }
+  const dataUrl = snapCanvas.toDataURL('image/jpeg', 0.82);
+  const at = new Date();
+  const snap = { at, dataUrl, ratio: diff.ratio, changed: diff.changed ?? 0, total: diff.total ?? 0 };
+  snaps.unshift(snap);
+  while (snaps.length > settings.keepSnapshots) snaps.pop();
+  $('btnSlideshow').disabled = !snaps.length;
+  if (settings.saveSnapshots) {
+    api.snapshots
+      .save({ dataUrl, stamp: `${stampDate(at)}_${hhmmss(at).replace(/:/g, '-')}` })
+      .catch(() => {});
+  }
+  return snap;
+}
+
+const stampDate = (d) => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+
+// --- the viewer -------------------------------------------------------------
+
+let viewer = null;
+
+function openViewer(index = 0) {
+  if (!snaps.length) return;
+  closeViewer();
+  let i = Math.min(Math.max(index, 0), snaps.length - 1);
+  let playing = false;
+  let timer = null;
+
+  const scrim = document.createElement('div');
+  scrim.className = 'scrim-full';
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet viewer';
+  const h = document.createElement('h2');
+  h.textContent = 'What tripped the alarm';
+  const figure = document.createElement('div');
+  figure.className = 'shot';
+  const img = document.createElement('img');
+  figure.append(img);
+  const cap = document.createElement('div');
+  cap.className = 'shot-cap';
+  const time = document.createElement('b');
+  const detail = document.createElement('span');
+  cap.append(time, detail);
+
+  const bar = document.createElement('div');
+  bar.className = 'row viewer-bar';
+  const prev = document.createElement('button');
+  prev.textContent = '‹ Previous';
+  const play = document.createElement('button');
+  play.className = 'primary';
+  play.textContent = 'Play';
+  const next = document.createElement('button');
+  next.textContent = 'Next ›';
+  const counter = document.createElement('span');
+  counter.className = 'muted small mono';
+  const spacer = document.createElement('span');
+  spacer.className = 'spacer';
+  const reveal = document.createElement('button');
+  reveal.className = 'ghost';
+  reveal.textContent = 'Open saved folder';
+  reveal.onclick = async () => {
+    const res = await api.snapshots.reveal();
+    if (!res?.ok) toast('Could not open the snapshots folder.', 'error');
+  };
+  const close = document.createElement('button');
+  close.textContent = 'Close';
+  close.onclick = () => closeViewer();
+  bar.append(prev, play, next, counter, spacer, reveal, close);
+
+  const show = () => {
+    const s2 = snaps[i];
+    if (!s2) return;
+    img.src = s2.dataUrl;
+    time.textContent = hhmmss(s2.at);
+    detail.textContent = `${s2.changed} px moved (${(s2.ratio * 100).toFixed(2)}% of the watched area)`;
+    counter.textContent = `${i + 1} / ${snaps.length}`;
+  };
+  const step = (d) => {
+    i = (i + d + snaps.length) % snaps.length;
+    show();
+  };
+  const stop = () => {
+    playing = false;
+    clearInterval(timer);
+    timer = null;
+    play.textContent = 'Play';
+  };
+  play.onclick = () => {
+    if (playing) return stop();
+    playing = true;
+    play.textContent = 'Pause';
+    timer = setInterval(() => step(1), 1500);
+  };
+  prev.onclick = () => {
+    stop();
+    step(-1);
+  };
+  next.onclick = () => {
+    stop();
+    step(1);
+  };
+
+  const onKey = (e) => {
+    if (e.key === 'Escape') closeViewer();
+    else if (e.key === 'ArrowLeft') { stop(); step(-1); }
+    else if (e.key === 'ArrowRight') { stop(); step(1); }
+    else if (e.code === 'Space') { e.preventDefault(); play.onclick(); }
+  };
+  document.addEventListener('keydown', onKey, true);
+
+  sheet.append(h, figure, cap, bar);
+  scrim.append(sheet);
+  scrim.onclick = (e) => {
+    if (e.target === scrim) closeViewer();
+  };
+  document.body.append(scrim);
+  viewer = { scrim, onKey, stop };
+  show();
+}
+
+function closeViewer() {
+  if (!viewer) return;
+  viewer.stop();
+  document.removeEventListener('keydown', viewer.onKey, true);
+  viewer.scrim.remove();
+  viewer = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -381,19 +584,39 @@ const two = (n) => String(n).padStart(2, '0');
 // a log that changes shape with LANG is a log nobody can grep.
 const hhmmss = (d) => `${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
 
-function logEvent(date, ratio) {
+function logEvent(date, diff, shot) {
   const log = $('log');
   log.querySelector('.empty')?.remove();
   const li = document.createElement('li');
+  const row = document.createElement('button');
+  row.className = 'log-row';
   const t = document.createElement('span');
   t.className = 't';
   t.textContent = hhmmss(date);
+  if (shot) {
+    const thumb = document.createElement('img');
+    thumb.className = 'thumb';
+    thumb.src = shot.dataUrl;
+    thumb.alt = '';
+    row.append(t, thumb);
+  } else {
+    row.append(t);
+  }
   const what = document.createElement('span');
-  what.textContent = 'motion in the watched area';
+  what.textContent = shot ? 'motion — click to see it' : 'motion in the watched area';
   const d = document.createElement('span');
   d.className = 'd';
-  d.textContent = `${(ratio * 100).toFixed(2)}%`;
-  li.append(t, what, d);
+  d.textContent = `${diff.changed ?? 0} px · ${(diff.ratio * 100).toFixed(2)}%`;
+  row.append(what, d);
+  // Snapshots age out of the front of the list, so a row finds its own picture
+  // by identity rather than by a position that shifts under it.
+  row.onclick = () => {
+    const at = shot ? snaps.indexOf(shot) : -1;
+    if (at >= 0) openViewer(at);
+    else toast('That snapshot has aged out of the viewer.');
+  };
+  if (!shot) row.disabled = true;
+  li.append(row);
   log.prepend(li);
   while (log.children.length > 50) log.lastElementChild.remove();
 }
@@ -570,6 +793,68 @@ function layoutRegion() {
     : '';
 }
 
+/**
+ * Draw the ignore rectangles over the preview.
+ *
+ * They live in the same coordinate space as the region (fractions of the frame)
+ * and are absolutely positioned inside the stage, so zooming and panning move
+ * them with everything else for free.
+ */
+function layoutExclusions() {
+  const host = $('exclusions');
+  const list = settings.exclusions || [];
+  host.replaceChildren();
+  list.forEach((e, i) => {
+    const el = document.createElement('div');
+    el.className = 'exclusion';
+    el.dataset.index = String(i);
+    el.style.left = `${e.x * 100}%`;
+    el.style.top = `${e.y * 100}%`;
+    el.style.width = `${e.w * 100}%`;
+    el.style.height = `${e.h * 100}%`;
+    el.title = 'Ignored area — drag to move, corner to resize';
+    const del = document.createElement('button');
+    del.className = 'x';
+    del.textContent = '×';
+    del.title = 'Remove this ignored area';
+    del.onclick = (ev) => {
+      ev.stopPropagation();
+      removeExclusion(i);
+    };
+    const grip = document.createElement('span');
+    grip.className = 'grip';
+    grip.dataset.dir = 'se';
+    el.append(del, grip);
+    host.append(el);
+  });
+  $('exclusionCount').textContent = list.length
+    ? `${list.length} ignored area${list.length === 1 ? '' : 's'}`
+    : 'No ignored areas';
+  $('btnClearExclusions').hidden = !list.length;
+  maskKey = ''; // force a rebuild on the next sample
+  resetBaseline();
+}
+
+function removeExclusion(i) {
+  const next = (settings.exclusions || []).filter((_, n) => n !== i);
+  patch({ exclusions: next }, { immediate: true });
+  layoutExclusions();
+}
+
+// Arm-to-draw: the next drag on the preview cuts an ignore rectangle instead of
+// moving the watched region. One-shot, because leaving the preview in a
+// different mode than it looks is how you lose a carefully drawn region.
+const EX_MIN = 0.005; // an ignore area may be much smaller than the region
+let drawingExclusion = false;
+function setExclusionMode(on) {
+  drawingExclusion = on;
+  $('btnAddExclusion').setAttribute('aria-pressed', String(on));
+  $('stage').classList.toggle('excluding', on);
+  $('watchHint').textContent = on
+    ? 'Drag over the part to ignore — motion inside it will never count. Press Esc to cancel.'
+    : 'Drag on the preview to draw the area. Drag inside it to move it, or grab a corner to resize.';
+}
+
 function setupRegionEditing() {
   const stage = $('stage');
   const clamp01 = (v) => Math.min(1, Math.max(0, v));
@@ -583,17 +868,38 @@ function setupRegionEditing() {
 
   stage.addEventListener('pointerdown', (e) => {
     if (!stream) return;
-    const grip = e.target.closest?.('.grip');
-    const inRegion = e.target.closest?.('.region');
+    if (e.button !== 0) return; // middle-drag pans, right-click is not ours
     const p = pointAt(e);
-    drag = {
-      mode: grip ? grip.dataset.dir : inRegion ? 'move' : 'new',
-      from: p,
-      start: { ...settings.region },
-    };
-    if (drag.mode === 'new') {
-      settings.region = { x: p.x, y: p.y, w: MIN, h: MIN };
-      layoutRegion();
+    const exEl = e.target.closest?.('.exclusion');
+
+    if (drawingExclusion) {
+      const list = [...(settings.exclusions || []), { x: p.x, y: p.y, w: EX_MIN, h: EX_MIN }];
+      settings.exclusions = list;
+      drag = { target: 'exclusion', index: list.length - 1, mode: 'new', from: p, start: { ...list[list.length - 1] } };
+      layoutExclusions();
+    } else if (exEl) {
+      const index = Number(exEl.dataset.index);
+      const grip = e.target.closest?.('.grip');
+      drag = {
+        target: 'exclusion',
+        index,
+        mode: grip ? 'se' : 'move',
+        from: p,
+        start: { ...settings.exclusions[index] },
+      };
+    } else {
+      const grip = e.target.closest?.('.grip');
+      const inRegion = e.target.closest?.('.region');
+      drag = {
+        target: 'region',
+        mode: grip ? grip.dataset.dir : inRegion ? 'move' : 'new',
+        from: p,
+        start: { ...settings.region },
+      };
+      if (drag.mode === 'new') {
+        settings.region = { x: p.x, y: p.y, w: MIN, h: MIN };
+        layoutRegion();
+      }
     }
     stage.setPointerCapture(e.pointerId);
     e.preventDefault();
@@ -606,6 +912,20 @@ function setupRegionEditing() {
     const p = hover;
     const s = drag.start;
     let r;
+    if (drag.target === 'exclusion') {
+      if (drag.mode === 'new') {
+        r = { x: Math.min(drag.from.x, p.x), y: Math.min(drag.from.y, p.y), w: Math.abs(p.x - drag.from.x), h: Math.abs(p.y - drag.from.y) };
+      } else if (drag.mode === 'move') {
+        r = { x: clamp01(Math.min(s.x + (p.x - drag.from.x), 1 - s.w)), y: clamp01(Math.min(s.y + (p.y - drag.from.y), 1 - s.h)), w: s.w, h: s.h };
+      } else {
+        r = { x: s.x, y: s.y, w: p.x - s.x, h: p.y - s.y };
+      }
+      r.w = Math.max(EX_MIN, Math.min(r.w, 1 - r.x));
+      r.h = Math.max(EX_MIN, Math.min(r.h, 1 - r.y));
+      settings.exclusions[drag.index] = r;
+      layoutExclusions();
+      return;
+    }
     if (drag.mode === 'new') {
       r = { x: Math.min(drag.from.x, p.x), y: Math.min(drag.from.y, p.y), w: Math.abs(p.x - drag.from.x), h: Math.abs(p.y - drag.from.y) };
     } else if (drag.mode === 'move') {
@@ -630,9 +950,16 @@ function setupRegionEditing() {
   const end = () => {
     hideLoupe();
     if (!drag) return;
+    const wasExclusion = drag.target === 'exclusion';
     drag = null;
-    patch({ region: settings.region }, { immediate: true });
-    layoutRegion();
+    if (wasExclusion) {
+      patch({ exclusions: settings.exclusions }, { immediate: true });
+      setExclusionMode(false);
+      layoutExclusions();
+    } else {
+      patch({ region: settings.region }, { immediate: true });
+      layoutRegion();
+    }
   };
   stage.addEventListener('pointerup', end);
   stage.addEventListener('pointercancel', end);
@@ -643,6 +970,17 @@ function setupRegionEditing() {
 // ---------------------------------------------------------------------------
 
 async function pickSource() {
+  layoutExclusions();
+
+  // A camera needs no portal handshake, so the app can pick up where it left
+  // off. A screen share cannot: resuming one would throw a permission dialog in
+  // the user's face on every launch, which is worse than one deliberate click.
+  if (!info.mock && settings.resumeCamera && settings.lastCamera) {
+    const cams = await listCameras();
+    const found = cams.find((c) => c.id === settings.lastCamera);
+    if (found) await takeCamera(found);
+  }
+
   if (info.mock) {
     await useStream(startMock());
     $('sourceName').textContent = 'Mock desktop (NX_SENTRY_MOCK=1)';
@@ -655,9 +993,9 @@ async function pickSource() {
     toast(`Could not list screens — ${err.message}`, 'error');
     return;
   }
-  if (sources.length === 1) return void takeSource(sources[0]);
-  if (!sources.length) {
-    toast('No screens or windows were offered by the desktop portal.', 'error');
+  const cameras = await listCameras();
+  if (!sources.length && !cameras.length) {
+    toast('No cameras, screens or windows were offered.', 'error');
     return;
   }
 
@@ -669,6 +1007,49 @@ async function pickSource() {
   h.textContent = 'Choose what to watch';
   const grid = document.createElement('div');
   grid.className = 'sources';
+
+  // Cameras first: they are the only source that opens without a portal
+  // handshake, so they are also the only one worth reaching for twice.
+  if (cameras.length) {
+    const label = document.createElement('div');
+    label.className = 'group-label';
+    label.textContent = 'Cameras';
+    sheet.append(h, label);
+    const camGrid = document.createElement('div');
+    camGrid.className = 'sources';
+    for (const c of cameras) {
+      const btn = document.createElement('button');
+      btn.className = 'source';
+      const art = document.createElement('div');
+      art.className = 'cam-art';
+      art.innerHTML =
+        '<svg viewBox="0 0 48 32" width="56" height="38" aria-hidden="true">' +
+        '<rect x="1" y="5" width="30" height="22" rx="3" fill="none" stroke="currentColor" stroke-width="2"/>' +
+        '<path d="M33 13l12-6v18l-12-6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>' +
+        '</svg>';
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const nm = document.createElement('div');
+      nm.className = 'nm';
+      nm.textContent = c.name;
+      const kd = document.createElement('div');
+      kd.className = 'kd';
+      kd.textContent = 'camera';
+      meta.append(nm, kd);
+      btn.append(art, meta);
+      btn.onclick = () => {
+        scrim.remove();
+        takeCamera(c);
+      };
+      camGrid.append(btn);
+    }
+    sheet.append(camGrid);
+    const label2 = document.createElement('div');
+    label2.className = 'group-label';
+    label2.textContent = 'Screens and windows';
+    sheet.append(label2);
+  }
+
   for (const s of sources) {
     const btn = document.createElement('button');
     btn.className = 'source';
@@ -699,7 +1080,8 @@ async function pickSource() {
   const cancel = document.createElement('button');
   cancel.textContent = 'Cancel';
   cancel.onclick = () => scrim.remove();
-  sheet.append(h, grid, note, cancel);
+  if (!cameras.length) sheet.append(h);
+  sheet.append(grid, note, cancel);
   scrim.append(sheet);
   scrim.onclick = (e) => {
     if (e.target === scrim) scrim.remove();
@@ -707,9 +1089,20 @@ async function pickSource() {
   document.body.append(scrim);
 }
 
+async function takeCamera(camera) {
+  try {
+    await useStream(await startCamera(camera.id), { kind: 'camera' });
+    $('sourceName').textContent = camera.name;
+    // Remember it by id, not by index: unplugging one camera renumbers the rest.
+    patch({ lastCamera: camera.id }, { immediate: true });
+  } catch (err) {
+    toast(`Could not open ${camera.name} — ${err.message}`, 'error');
+  }
+}
+
 async function takeSource(source) {
   try {
-    await useStream(await startCapture(source.id, api));
+    await useStream(await startCapture(source.id, api), { kind: 'screen' });
     $('sourceName').textContent = source.name;
   } catch (err) {
     // The portal dialog was dismissed, or the compositor refused.
@@ -762,6 +1155,8 @@ function bindControls() {
     showSensHint();
   });
   toggle('tNotify', 'notify');
+  toggle('tSaveShots', 'saveSnapshots');
+  toggle('tResumeCam', 'resumeCamera');
   toggle('tFlash', 'flashWindow');
   toggle('tTray', 'minimizeToTray');
   $('alarmMsField').style.opacity = s.holdUntilDismissed ? '0.4' : '1';
@@ -797,6 +1192,13 @@ function bindControls() {
     resetBaseline();
     layoutRegion();
   });
+  $('btnAddExclusion').addEventListener('click', () => setExclusionMode(!drawingExclusion));
+  $('btnClearExclusions').addEventListener('click', () => {
+    patch({ exclusions: [] }, { immediate: true });
+    layoutExclusions();
+  });
+  $('btnSlideshow').addEventListener('click', () => openViewer(0));
+
   $('btnCentre').addEventListener('click', () => {
     patch({ region: { x: 1 / 3, y: 1 / 3, w: 1 / 3, h: 1 / 3 } }, { immediate: true });
     resetBaseline();
@@ -949,6 +1351,7 @@ function showAnalysisHint() {
   }
   const region = `${a.sw}×${a.sh}`;
   const cost = sampleCostMs >= 0.05 ? ` · ${sampleCostMs.toFixed(1)} ms/sample` : '';
+  const ignored = mask ? ` · ${Math.round((mask.ignored / (a.aw * a.ah)) * 100)}% ignored` : '';
   const overrun = samplingPeriod && sampleCostMs > samplingPeriod * 0.8;
   $('analysisHint').classList.toggle('warn', !!overrun);
   if (overrun) {
@@ -958,11 +1361,11 @@ function showAnalysisHint() {
     return;
   }
   if (!a.exact) {
-    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} downscaled from ${region}${cost} — one sample covers ~${Math.max(1, Math.round(a.sw / a.aw))}×${Math.max(1, Math.round(a.sh / a.ah))} screen pixels`;
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} downscaled from ${region}${cost}${ignored} — one sample covers ~${Math.max(1, Math.round(a.sw / a.aw))}×${Math.max(1, Math.round(a.sh / a.ah))} screen pixels`;
   } else if (a.capped) {
     $('analysisHint').textContent = `region too large for 1:1 — analysing ${a.aw}×${a.ah} of ${region}${cost}. Draw a smaller area for true pixel-exact watching.`;
   } else {
-    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} at 1:1${cost} — one sample is one screen pixel`;
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} at 1:1${cost}${ignored} — one sample is one screen pixel`;
   }
 }
 
@@ -1018,6 +1421,17 @@ async function boot() {
   const warm = () => alarm.ensure();
   document.addEventListener('pointerdown', warm, { once: true });
   document.addEventListener('keydown', warm, { once: true });
+  layoutExclusions();
+
+  // A camera needs no portal handshake, so the app can pick up where it left
+  // off. A screen share cannot: resuming one would throw a permission dialog in
+  // the user's face on every launch, which is worse than one deliberate click.
+  if (!info.mock && settings.resumeCamera && settings.lastCamera) {
+    const cams = await listCameras();
+    const found = cams.find((c) => c.id === settings.lastCamera);
+    if (found) await takeCamera(found);
+  }
+
   if (info.mock) {
     // Headless runs go straight to the fake desktop, and NX_SENTRY_AUTOARM=1
     // additionally arms the sentry so a screenshot can show the live states.

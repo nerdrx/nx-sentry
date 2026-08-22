@@ -7,7 +7,7 @@
 import { app, BrowserWindow, Menu, Notification, Tray, desktopCapturer, ipcMain, nativeImage, powerSaveBlocker, shell } from 'electron';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import * as config from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -249,6 +249,36 @@ function registerIpc() {
   });
 
   ipcMain.handle('sentry:window.hide', () => win?.hide());
+
+  // Trigger snapshots, when the user has turned saving on. They are written
+  // under the config directory and nowhere else — this is a webcam's worth of
+  // privacy, so the path is not caller-controlled: the renderer supplies image
+  // bytes and a timestamp, main decides where they land.
+  ipcMain.handle('sentry:snapshots.save', (_e, { dataUrl, stamp } = {}) => {
+    if (!config.load().saveSnapshots) return null;
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/jpeg;base64,')) return null;
+    const dir = join(config.configDir(), 'snapshots');
+    const name = `${String(stamp || '').replace(/[^0-9T:_-]/g, '').slice(0, 32) || 'snapshot'}.jpg`;
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, name), Buffer.from(dataUrl.split(',')[1], 'base64'));
+      return join(dir, name);
+    } catch (err) {
+      console.warn('[snapshots] save failed:', err.message);
+      return null;
+    }
+  });
+
+  ipcMain.handle('sentry:snapshots.reveal', async () => {
+    const dir = join(config.configDir(), 'snapshots');
+    try {
+      mkdirSync(dir, { recursive: true });
+    } catch {
+      /* shown as a failure below */
+    }
+    const err = await shell.openPath(dir);
+    return err ? { ok: false, error: err } : { ok: true, dir };
+  });
 }
 
 // ---------------------------------------------------------------------------

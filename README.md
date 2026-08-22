@@ -16,6 +16,11 @@ makes a noise when the pixels in it change.
 *Shown running against the built-in mock desktop, the synthetic source the test
 harness uses.*
 
+![The trigger viewer](docs/screenshots/trigger-viewer.png)
+
+*Every trigger keeps a picture: what moved is outlined, what is ignored is
+marked, and the timestamp says when.*
+
 ![Pixel-exact mode at ×1000](docs/screenshots/pixel-exact.png)
 
 *Pixel-exact at ×1000: the region analysed 1:1, tripping at a single changed
@@ -23,6 +28,9 @@ pixel.*
 
 ## What it does
 
+- **Watch a camera, a screen or a window.** Cameras come straight from V4L2 on
+  Linux — a webcam, a capture card, a virtual device — with no portal handshake,
+  which is also why the last camera can be reopened automatically on launch.
 - **Watch any part of any screen or window.** Pick a source, drag a rectangle
   over the preview, done. The rest of the screen is ignored entirely.
 - **Sound an alarm when it moves.** Four synthesised alarms — siren, beep,
@@ -40,6 +48,16 @@ pixel.*
   ×1000 takes the thresholds down to "any change at all", and pixel-exact mode
   drops the downscaling entirely — the region is analysed 1:1 and compared
   channel by channel, so a single pixel changing colour is a trigger.
+- **Ignore the parts that always move.** Draw ignore areas over the bits you
+  don't care about — a clock, a timestamp burnt into a camera image, a tree in
+  the corner of the garden — and motion inside them never counts. They are
+  pinned to the frame, so they stay over the thing they cover while you move the
+  watched rectangle around them, and the percentage is measured against what is
+  actually being watched rather than the whole rectangle.
+- **See what tripped it.** Every trigger keeps a picture of the watched area
+  with the moving part outlined and the ignored parts marked. Click any event to
+  open the viewer, step through with the arrow keys, or play them as a
+  slideshow. Optionally they are written to disk as JPEGs too.
 - **Not scream at every flicker.** A grace period after arming, a
   frames-in-a-row requirement before it fires, and a quiet time after each
   alarm, so a compression artefact or your own mouse leaving the room does not
@@ -64,12 +82,15 @@ git clone https://github.com/nerdrx/nx-sentry && cd nx-sentry && npm install && 
 
 ## Using it
 
-1. **Choose what to watch** — a screen or a single window. On Wayland your
-   desktop asks again, in its own dialog; that second dialog is the one that
-   actually grants the capture.
+1. **Choose what to watch** — a camera, a screen, or a single window. Cameras
+   open directly. For a screen or window on Wayland your desktop asks again, in
+   its own dialog; that second dialog is the one that actually grants the
+   capture.
 2. **Drag a rectangle** on the preview. Drag inside it to move it, grab a corner
    to resize, or use *Whole screen* / *Centre third*.
-3. **Start watching.** You get a grace period (3 seconds by default) to get your
+3. **Ignore an area** (optional) — click *Ignore an area* and drag over anything
+   inside the rectangle that moves but does not matter.
+4. **Start watching.** You get a grace period (3 seconds by default) to get your
    hands off the mouse, then the sentry is live.
 
 For a small target — a status dot, a single row, a health bar — zoom in with
@@ -89,6 +110,7 @@ do both without opening the window.
 | **Sensitivity** | Both thresholds at once: how much a pixel's brightness must change, and how much of the area must change with it. At 0 it wants a person walking past; at 100 a cursor twitch will do it. |
 | **Sensitivity multiplier** | Divides both thresholds by ×1 to ×1000, geometrically. Past roughly ×8 the brightness threshold reaches zero — a change of one unit counts — and the area threshold falls below a single pixel of any realistic region. |
 | **Pixel-exact** | Analyses the region at 1:1 instead of a 192px thumbnail, and compares colour channels instead of brightness. Both halves matter: a downscale averages one changed pixel into its neighbours, and greyscale maps different colours onto the same luma, so a pixel that changes colour without changing brightness is invisible without this. Cost is linear in the region's area (5.8ms per sample at 1080p), so it is capped at 4 megapixels and says so when a region exceeds that. The panel shows the measured cost per sample and warns when a sample no longer fits inside its own interval. |
+| **Ignore areas** | Rectangles whose pixels never count. They are subtracted from the measurement, not just hidden: the detection panel reports how much of the analysed area they cover, and the percentage you see is a share of what remains. |
 | **Minimum changed pixels** | An absolute floor ANDed with the area threshold — what stops a boosted, pixel-exact setup from firing on one stray pixel of video noise. At 1 it is a no-op. |
 | **Frames before it fires** | How many consecutive samples must be over the threshold. Two is enough to reject codec noise; raise it if a video is playing next to the area you care about. |
 | **Grace period** | Motion during this window after arming is ignored — it is you leaving. |
@@ -138,11 +160,18 @@ typed arrays — no DOM, no canvas — so `npm test` exercises exactly the code 
 runs in the app.
 
 Nothing leaves the machine. There is no recording, no upload, no network code in
-this app at all; frames are compared and thrown away.
+this app at all. Trigger snapshots live in memory — the last 24 by default — and
+are only written to disk if you turn that on, in which case they go to
+`~/.config/nx-sentry/snapshots` and nowhere else: the renderer hands over image
+bytes and a timestamp, and the main process decides the path.
 
 ## Platform notes
 
-- **Linux / Wayland** — capture goes through `xdg-desktop-portal` and PipeWire,
+- **Cameras** — opened through Chromium's capture stack, which on Linux means
+  V4L2. No portal is involved, so a camera can be reopened on launch without a
+  dialog; the app asks for the device by id, never by index, so unplugging one
+  camera cannot silently promote another into its place.
+- **Linux / Wayland** — screen capture goes through `xdg-desktop-portal` and PipeWire,
   so the compositor decides what NX Sentry may see and can revoke it at any
   time. If the share ends, the sentry disarms itself and says so rather than
   pretending to watch a dead stream.

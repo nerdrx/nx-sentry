@@ -56,6 +56,7 @@
                 <button class="primary" id="btnSourceEmpty">Choose what to watch</button>
               </div>
             </div>
+            <div class="exclusions" id="exclusions"></div>
             <div class="region" id="region" hidden>
               <span class="tag mono" id="regionTag">—</span>
               <span class="grip" data-dir="nw"></span><span class="grip" data-dir="ne"></span>
@@ -76,6 +77,9 @@
         <div class="row mt-2">
           <button id="btnWhole">Whole screen</button>
           <button id="btnCentre">Centre third</button>
+          <button id="btnAddExclusion" aria-pressed="false" title="Draw an area whose motion never counts">Ignore an area</button>
+          <span class="muted small" id="exclusionCount">No ignored areas</span>
+          <button id="btnClearExclusions" class="ghost" hidden>Clear</button>
           <span class="muted small" id="sourceName">No source</span>
         </div>
         <hr class="hairline" />
@@ -83,8 +87,13 @@
       </section>
 
       <section class="card">
-        <h2>Events</h2>
+        <div class="row">
+          <h2>Events</h2>
+          <span class="spacer"></span>
+          <button id="btnSlideshow" class="ghost" disabled>Slideshow</button>
+        </div>
         <ul class="log" id="log"><li class="empty">No motion recorded yet.</li></ul>
+        <p class="hint small" id="logHint">Every trigger keeps a picture of the watched area with the moving part outlined. Click one to see it.</p>
       </section>
       </div>
 
@@ -167,6 +176,8 @@
           <label class="toggle"><input type="checkbox" id="tHold" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Keep sounding until I stop it</label>
           <label class="toggle"><input type="checkbox" id="tNotify" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Desktop notification</label>
           <label class="toggle"><input type="checkbox" id="tFlash" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Flash the window in the taskbar</label>
+          <label class="toggle"><input type="checkbox" id="tSaveShots" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Save trigger snapshots to disk</label>
+          <label class="toggle"><input type="checkbox" id="tResumeCam" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Reopen the last camera on launch</label>
           <label class="toggle"><input type="checkbox" id="tTray" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Closing the window keeps it watching in the tray</label>
           <hr class="hairline" />
           <div class="row">

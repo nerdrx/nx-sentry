@@ -14,6 +14,10 @@ import { join } from 'node:path';
 export const DEFAULTS = {
   // region of the captured screen to watch, normalised 0..1 of the frame
   region: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
+  // Rectangles inside the frame whose pixels never count as motion. Frame
+  // coordinates, not region coordinates: they stay pinned to the thing they
+  // cover when the watched rectangle moves.
+  exclusions: [],
   sensitivity: 55, // 0..100 slider; maps to pixel + area thresholds
   sensitivityBoost: 1, // ×1..×1000 multiplier dividing both thresholds
   minChangedPixels: 1, // absolute floor: fewer changed pixels than this never fires
@@ -30,7 +34,27 @@ export const DEFAULTS = {
   flashWindow: true, // bounce the taskbar entry / show the window
   minimizeToTray: true,
   analyzeFps: 8, // frames per second sampled from the capture
+  // Camera sources are remembered and reopened on launch — unlike a screen
+  // share, a camera needs no portal handshake, so resuming it is free.
+  lastCamera: '', // deviceId of the last camera watched
+  resumeCamera: true,
+  keepSnapshots: 24, // how many trigger snapshots stay in the viewer
+  saveSnapshots: false, // also write them to <config>/snapshots as JPEGs
 };
+
+const MAX_EXCLUSIONS = 32;
+
+/** Clamp one rectangle into the frame, with a floor so it cannot vanish. */
+function sanitizeRect(r, floor = 0.005) {
+  if (!r || typeof r !== 'object') return null;
+  const n = (v) => (Number.isFinite(v) ? clamp(v, 0, 1) : null);
+  const x = n(r.x), y = n(r.y);
+  if (x === null || y === null) return null;
+  const w = Number.isFinite(r.w) ? clamp(r.w, floor, 1 - x) : null;
+  const h = Number.isFinite(r.h) ? clamp(r.h, floor, 1 - y) : null;
+  if (w === null || h === null) return null;
+  return { x, y, w, h };
+}
 
 /** The config directory: $NX_SENTRY_CONFIG_DIR if set, else ~/.config/nx-sentry. */
 export function configDir() {
@@ -61,6 +85,10 @@ export function sanitize(patch, base = DEFAULTS) {
     const h = clamp(n(p.region.h, base.region.h), 0.01, 1 - y);
     s.region = { x, y, w, h };
   }
+  if (Array.isArray(p.exclusions)) {
+    s.exclusions = p.exclusions.map((r) => sanitizeRect(r)).filter(Boolean).slice(0, MAX_EXCLUSIONS);
+  }
+  if (typeof p.lastCamera === 'string') s.lastCamera = p.lastCamera.slice(0, 256);
   const num = (key, lo, hi) => {
     if (Number.isFinite(p[key])) s[key] = clamp(p[key], lo, hi);
   };
@@ -73,12 +101,16 @@ export function sanitize(patch, base = DEFAULTS) {
   num('alarmVolume', 0, 1);
   num('alarmMs', 500, 120000);
   num('analyzeFps', 1, 30);
+  num('keepSnapshots', 0, 200);
   if (['siren', 'beep', 'pulse', 'chime'].includes(p.alarmSound)) s.alarmSound = p.alarmSound;
   // Device ids are opaque strings from the browser; keep them bounded.
   if (typeof p.outputDeviceId === 'string' && p.outputDeviceId.length <= 512) {
     s.outputDeviceId = p.outputDeviceId;
   }
-  for (const key of ['holdUntilDismissed', 'notify', 'flashWindow', 'minimizeToTray', 'pixelExact']) {
+  for (const key of [
+    'holdUntilDismissed', 'notify', 'flashWindow', 'minimizeToTray', 'pixelExact',
+    'resumeCamera', 'saveSnapshots',
+  ]) {
     if (typeof p[key] === 'boolean') s[key] = p[key];
   }
   return s;
