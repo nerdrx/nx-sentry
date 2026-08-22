@@ -45,6 +45,16 @@ app.commandLine.appendSwitch('disable-background-timer-throttling');
 app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 
+// A test or headless run must not share ANYTHING with the copy the user has
+// installed. $NX_SENTRY_CONFIG_DIR already redirects settings.json, but
+// Electron's own userData directory holds the single-instance lock, the cache
+// and the GPU state — leave it at the default and a headless run either quits
+// instantly because the real app holds the lock, or pops the real app's window
+// to the front via 'second-instance'. Redirect it with the settings.
+if (process.env.NX_SENTRY_CONFIG_DIR) {
+  app.setPath('userData', join(config.configDir(), 'electron'));
+}
+
 if (!app.requestSingleInstanceLock()) app.quit();
 
 function createWindow() {

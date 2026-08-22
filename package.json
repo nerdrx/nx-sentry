@@ -1,7 +1,7 @@
 {
   "name": "nx-sentry",
   "productName": "NX Sentry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Watches a rectangle of your screen and sounds an alarm when something moves in it",
   "main": "src/main/index.js",
   "type": "module",

@@ -15,6 +15,9 @@ export const DEFAULTS = {
   // region of the captured screen to watch, normalised 0..1 of the frame
   region: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 },
   sensitivity: 55, // 0..100 slider; maps to pixel + area thresholds
+  sensitivityBoost: 1, // ×1..×1000 multiplier dividing both thresholds
+  minChangedPixels: 1, // absolute floor: fewer changed pixels than this never fires
+  pixelExact: false, // analyse at 1:1 and compare colour channels, not brightness
   holdFrames: 2, // consecutive moving frames before the alarm fires
   warmupMs: 3000, // grace period after arming (walk away from the mouse)
   cooldownMs: 8000, // silence after an alarm before it can fire again
@@ -61,6 +64,8 @@ export function sanitize(patch, base = DEFAULTS) {
     if (Number.isFinite(p[key])) s[key] = clamp(p[key], lo, hi);
   };
   num('sensitivity', 0, 100);
+  num('sensitivityBoost', 1, 1000);
+  num('minChangedPixels', 1, 100000);
   num('holdFrames', 1, 30);
   num('warmupMs', 0, 60000);
   num('cooldownMs', 0, 600000);
@@ -68,7 +73,7 @@ export function sanitize(patch, base = DEFAULTS) {
   num('alarmMs', 500, 120000);
   num('analyzeFps', 1, 30);
   if (['siren', 'beep', 'pulse', 'chime'].includes(p.alarmSound)) s.alarmSound = p.alarmSound;
-  for (const key of ['holdUntilDismissed', 'notify', 'flashWindow', 'minimizeToTray']) {
+  for (const key of ['holdUntilDismissed', 'notify', 'flashWindow', 'minimizeToTray', 'pixelExact']) {
     if (typeof p[key] === 'boolean') s[key] = p[key];
   }
   return s;

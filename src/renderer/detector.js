@@ -12,21 +12,44 @@
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
 /**
- * Map the single user-facing sensitivity slider (0..100) onto the two knobs the
- * detector actually has. Both move together on purpose: a sensitive setting
- * should notice both fainter changes (lower luma threshold) and smaller ones
- * (lower area threshold).
+ * Map the user-facing sensitivity slider (0..100) and its multiplier onto the
+ * two knobs the detector actually has. Both move together on purpose: a
+ * sensitive setting should notice both fainter changes (lower luma threshold)
+ * and smaller ones (lower area threshold).
  *
  * 0   → luma must move 48/255 across 2.5% of the region (a person walking past)
  * 100 → luma must move 8/255 across 0.06% of the region (a cursor twitch)
+ *
+ * The slider alone bottoms out at "a cursor twitch", which is nowhere near the
+ * floor of what the hardware can see. `boost` divides both thresholds, so ×1000
+ * takes them to "any change at all, anywhere" — a threshold of 0 means a delta
+ * of a single unit counts, and the area threshold falls below one pixel of any
+ * realistic region. Guard the bottom end with `minChangedPixels` on the gate.
  */
-export function sensitivityToParams(sensitivity) {
+export function sensitivityToParams(sensitivity, boost = 1) {
   const s = clamp(Number(sensitivity) || 0, 0, 100) / 100;
-  const pixelThreshold = Math.round(48 - 40 * s);
+  const b = clamp(Number(boost) || 1, 1, 1000);
+  const pixelThreshold = Math.max(0, Math.round((48 - 40 * s) / b));
   // Geometric, not linear: the interesting range is all down at the small end,
   // and a linear slider would spend 90% of its travel between "huge" and "big".
-  const minAreaPct = 2.5 * Math.pow(0.06 / 2.5, s);
-  return { pixelThreshold, minAreaPct: Number(minAreaPct.toFixed(4)) };
+  const minAreaPct = (2.5 * Math.pow(0.06 / 2.5, s)) / b;
+  return {
+    pixelThreshold,
+    // Six decimals so a big boost stays representable: 0.06% / 1000 is
+    // 0.00006%, which rounds to zero at four.
+    minAreaPct: Number(minAreaPct.toFixed(6)),
+  };
+}
+
+/** Slider position (0..100) ↔ multiplier (×1..×1000), geometric in both directions. */
+export function boostFromSlider(v) {
+  const n = clamp(Number(v) || 0, 0, 100);
+  const boost = Math.pow(10, (n / 100) * 3);
+  return Number(boost < 10 ? boost.toFixed(1) : boost.toFixed(0));
+}
+export function sliderFromBoost(boost) {
+  const b = clamp(Number(boost) || 1, 1, 1000);
+  return Math.round((Math.log10(b) / 3) * 100);
 }
 
 /**
@@ -76,6 +99,46 @@ export function frameDiff(prev, curr, width, height, pixelThreshold) {
   };
 }
 
+/**
+ * Compare two RGBA frames channel by channel — the pixel-exact path.
+ *
+ * Grayscale is lossy: BT.601 maps different colours onto the same luma, so a
+ * pixel that flips from one colour to another of equal brightness is invisible
+ * to frameDiff. When the question is "did this pixel change at all", the answer
+ * has to come from the channels themselves. A threshold of 0 means any
+ * difference of one unit in any channel counts. Alpha is ignored — a capture
+ * stream is opaque, and a compositor writing 254 there is not motion.
+ */
+export function frameDiffRGBA(prev, curr, width, height, threshold = 0) {
+  const total = width * height;
+  if (!prev || !curr || prev.length !== curr.length || curr.length !== total * 4) {
+    return { changed: 0, total, ratio: 0, bbox: null };
+  }
+  let changed = 0;
+  let minX = width, minY = height, maxX = -1, maxY = -1;
+  for (let i = 0, j = 0; i < total; i++, j += 4) {
+    const dr = curr[j] - prev[j];
+    const dg = curr[j + 1] - prev[j + 1];
+    const db = curr[j + 2] - prev[j + 2];
+    const d = Math.max(dr < 0 ? -dr : dr, dg < 0 ? -dg : dg, db < 0 ? -db : db);
+    if (d > threshold) {
+      changed++;
+      const x = i % width;
+      const y = (i - x) / width;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  return {
+    changed,
+    total,
+    ratio: total ? changed / total : 0,
+    bbox: maxX < 0 ? null : { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 },
+  };
+}
+
 export const STATE = {
   IDLE: 'idle',
   WARMUP: 'warmup',
@@ -99,6 +162,11 @@ export class MotionGate {
   constructor(opts = {}) {
     this.opts = {
       minAreaPct: 0.5,
+      // An absolute floor in pixels, ANDed with the area threshold. At 1 it is
+      // a no-op (any single changed pixel may pass); above that it is what
+      // stops a boosted, pixel-exact setup from firing on one stray pixel of
+      // video noise. It only applies when the caller reports pixel counts.
+      minChangedPixels: 1,
       holdFrames: 2,
       warmupMs: 3000,
       cooldownMs: 8000,
@@ -149,13 +217,20 @@ export class MotionGate {
   }
 
   /**
-   * Feed one sampled motion ratio. Returns a snapshot for the UI; `fired` is
-   * true on exactly the tick the alarm starts, so the caller plays the sound
-   * once rather than every frame.
+   * Feed one sample. Accepts either a bare motion ratio or the whole diff
+   * result ({ ratio, changed, total }); the latter is what lets
+   * `minChangedPixels` apply, since a percentage alone cannot say how many
+   * pixels it stands for. Returns a snapshot for the UI; `fired` is true on
+   * exactly the tick the alarm starts, so the caller plays the sound once
+   * rather than every frame.
    */
-  update(ratio, now) {
+  update(sample, now) {
     const o = this.opts;
-    const over = ratio >= o.minAreaPct / 100;
+    const ratio = typeof sample === 'number' ? sample : (sample?.ratio ?? 0);
+    const changed = typeof sample === 'number' ? null : sample?.changed ?? null;
+    const over =
+      ratio >= o.minAreaPct / 100 &&
+      (changed === null || changed >= Math.max(1, o.minChangedPixels));
     let fired = false;
 
     switch (this.state) {
@@ -216,4 +291,13 @@ export class MotionGate {
   }
 }
 
-export default { sensitivityToParams, toGray, frameDiff, MotionGate, STATE };
+export default {
+  sensitivityToParams,
+  boostFromSlider,
+  sliderFromBoost,
+  toGray,
+  frameDiff,
+  frameDiffRGBA,
+  MotionGate,
+  STATE,
+};

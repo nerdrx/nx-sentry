@@ -5,8 +5,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   sensitivityToParams,
+  boostFromSlider,
+  sliderFromBoost,
   toGray,
   frameDiff,
+  frameDiffRGBA,
   MotionGate,
   STATE,
 } from '../src/renderer/detector.js';
@@ -143,4 +146,91 @@ test('the snapshot reports armed so the UI can style the region', () => {
   assert.equal(g.update(0.5, 300).armed, true, 'and so does a sounding alarm');
   g.disarm();
   assert.equal(g.update(0.5, 400).armed, false);
+});
+
+// --------------------------------------------------------------------------
+// The sensitivity multiplier and pixel-exact watching
+// --------------------------------------------------------------------------
+
+test('the multiplier divides both thresholds and bottoms out at "any change"', () => {
+  const base = sensitivityToParams(55);
+  const x10 = sensitivityToParams(55, 10);
+  assert.ok(x10.pixelThreshold < base.pixelThreshold);
+  assert.ok(Math.abs(x10.minAreaPct - base.minAreaPct / 10) < 1e-6);
+
+  // At the top of the range a single unit of change in one channel counts, and
+  // the area threshold is far below one pixel of any realistic region.
+  const max = sensitivityToParams(100, 1000);
+  assert.equal(max.pixelThreshold, 0);
+  assert.ok(max.minAreaPct > 0, 'still a positive number, not rounded to zero');
+  assert.ok(max.minAreaPct * 0.01 * 1_000_000 < 1, 'under one pixel of a 1MP region');
+
+  // Out-of-range multipliers are clamped, never NaN.
+  assert.deepEqual(sensitivityToParams(55, 0), base);
+  assert.deepEqual(sensitivityToParams(55, 1e9), sensitivityToParams(55, 1000));
+  assert.deepEqual(sensitivityToParams(55, 'x'), base);
+});
+
+test('the multiplier slider mapping round-trips', () => {
+  assert.equal(boostFromSlider(0), 1);
+  assert.equal(boostFromSlider(100), 1000);
+  for (const v of [0, 17, 33, 50, 78, 100]) {
+    assert.equal(sliderFromBoost(boostFromSlider(v)), v, `slider ${v}`);
+  }
+  assert.ok(boostFromSlider(50) > boostFromSlider(49), 'monotonic');
+});
+
+test('frameDiffRGBA sees a single pixel change that grayscale misses', () => {
+  const w = 4, h = 4;
+  const a = new Uint8ClampedArray(w * h * 4).fill(0);
+  const b = new Uint8ClampedArray(w * h * 4).fill(0);
+  // Two colours chosen to share a luma under BT.601 weights: only a channel
+  // comparison can tell them apart.
+  const i = 5 * 4;
+  a[i] = 30; a[i + 1] = 30; a[i + 2] = 30;
+  b[i] = 14; b[i + 1] = 44; b[i + 2] = 1;
+  assert.equal(toGray(a, new Uint8Array(w * h))[5], toGray(b, new Uint8Array(w * h))[5],
+    'the two colours are identical in grayscale');
+  assert.equal(frameDiff(toGray(a, null), toGray(b, null), w, h, 0).changed, 0);
+
+  const d = frameDiffRGBA(a, b, w, h, 0);
+  assert.equal(d.changed, 1);
+  assert.deepEqual(d.bbox, { x: 1, y: 1, w: 1, h: 1 });
+  assert.equal(d.total, 16);
+});
+
+test('frameDiffRGBA with threshold 0 counts a one-unit change, and ignores alpha', () => {
+  const w = 2, h = 1;
+  const a = new Uint8ClampedArray([10, 10, 10, 255, 10, 10, 10, 255]);
+  const b = new Uint8ClampedArray([11, 10, 10, 255, 10, 10, 10, 3]);
+  const d = frameDiffRGBA(a, b, w, h, 0);
+  assert.equal(d.changed, 1, 'the +1 red counts, the alpha drop does not');
+  assert.equal(frameDiffRGBA(a, b, w, h, 1).changed, 0, 'threshold 1 needs more than one unit');
+});
+
+test('frameDiffRGBA is safe on the first frame and on size changes', () => {
+  const b = new Uint8ClampedArray(16);
+  assert.deepEqual(frameDiffRGBA(null, b, 2, 2, 0), { changed: 0, total: 4, ratio: 0, bbox: null });
+  assert.equal(frameDiffRGBA(new Uint8ClampedArray(8), b, 2, 2, 0).ratio, 0);
+});
+
+test('gate: minChangedPixels is a floor under the area threshold', () => {
+  const g = new MotionGate({ minAreaPct: 0.0001, minChangedPixels: 5, holdFrames: 1, warmupMs: 0 });
+  g.arm(0);
+  // 3 pixels of a 10000-pixel region clears the area threshold but not the floor.
+  assert.equal(g.update({ ratio: 3 / 10000, changed: 3, total: 10000 }, 10).fired, false);
+  assert.equal(g.update({ ratio: 5 / 10000, changed: 5, total: 10000 }, 20).fired, true);
+});
+
+test('gate: one changed pixel fires when the floor is 1', () => {
+  const g = new MotionGate({ minAreaPct: 0.000006, minChangedPixels: 1, holdFrames: 1, warmupMs: 0 });
+  g.arm(0);
+  const r = g.update({ ratio: 1 / 2_000_000, changed: 1, total: 2_000_000 }, 10);
+  assert.equal(r.fired, true, 'a single pixel of a 2MP region is enough');
+});
+
+test('gate: a bare ratio still works and skips the pixel floor', () => {
+  const g = new MotionGate({ minAreaPct: 1, minChangedPixels: 500, holdFrames: 1, warmupMs: 0 });
+  g.arm(0);
+  assert.equal(g.update(0.02, 10).fired, true, 'no pixel count reported, no floor applied');
 });

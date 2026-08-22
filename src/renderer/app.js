@@ -2,15 +2,30 @@
 // detector.js (unit-tested headless), the noise in alarm.js, the pixels in
 // capture.js; this file wires them to the DOM and to the settings file.
 
-import { sensitivityToParams, toGray, frameDiff, MotionGate, STATE } from './detector.js';
+import {
+  sensitivityToParams,
+  boostFromSlider,
+  sliderFromBoost,
+  toGray,
+  frameDiff,
+  frameDiffRGBA,
+  MotionGate,
+  STATE,
+} from './detector.js';
 import { Alarm } from './alarm.js';
 import { startCapture, startMock } from './capture.js';
 
 const $ = (id) => document.getElementById(id);
 
 // 0.3214 → "0.32", 2.5 → "2.5". Percentages in the UI never carry more digits
-// than the eye can use.
-const pct = (v) => (v >= 1 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, '');
+// than the eye can use — except at the bottom of the multiplier's range, where
+// two decimals would round a real threshold down to a flat "0%" and claim the
+// sentry fires on nothing at all.
+const pct = (v) => {
+  if (!Number.isFinite(v) || v <= 0) return '0';
+  if (v < 0.01) return String(Number(v.toPrecision(2)));
+  return (v >= 1 ? v.toFixed(1) : v.toFixed(2)).replace(/\.?0+$/, '');
+};
 
 // Without the preload bridge (renderer opened directly in a browser for UI
 // work) everything still runs — settings just live for the session.
@@ -43,7 +58,16 @@ let params = { pixelThreshold: 24, minAreaPct: 0.35 };
 const work = document.createElement('canvas');
 const wctx = work.getContext('2d', { willReadFrequently: true });
 let bufA = null, bufB = null, useA = true, prevGray = null;
+let prevRGBA = null; // pixel-exact baseline: the previous frame's raw channels
+let hasExactBaseline = false;
 let blobTimer = null;
+let lastAnalysis = { aw: 0, ah: 0, sw: 0, sh: 0, exact: false, capped: false };
+
+// Pixel-exact analysis reads and diffs every pixel of the region, so the cost
+// is linear in its area. Past this many pixels a sample would not finish inside
+// a frame interval, so the region is scaled down and the UI says so rather than
+// quietly promising an exactness it is not delivering.
+const EXACT_MAX_PIXELS = 4_000_000;
 
 // ---------------------------------------------------------------------------
 // Settings
@@ -63,9 +87,10 @@ function patch(p, { immediate = false } = {}) {
 }
 
 function applySettings() {
-  params = sensitivityToParams(settings.sensitivity);
+  params = sensitivityToParams(settings.sensitivity, settings.sensitivityBoost);
   gate.configure({
     minAreaPct: params.minAreaPct,
+    minChangedPixels: settings.minChangedPixels,
     holdFrames: settings.holdFrames,
     warmupMs: settings.warmupMs,
     cooldownMs: settings.cooldownMs,
@@ -89,7 +114,7 @@ async function useStream(next) {
   $('scrim').classList.add('hidden');
   $('region').hidden = false;
   $('btnArm').disabled = false;
-  prevGray = null;
+  resetBaseline();
 
   const track = stream.getVideoTracks()[0];
   track.addEventListener('ended', () => {
@@ -114,6 +139,12 @@ async function useStream(next) {
   restartSampling();
 }
 
+/** Forget the previous frame, in whichever mode holds it. */
+function resetBaseline() {
+  prevGray = null;
+  hasExactBaseline = false;
+}
+
 function stopStream() {
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null;
@@ -133,9 +164,14 @@ function sample() {
   const sx = Math.round(r.x * vw), sy = Math.round(r.y * vh);
   const sw = Math.max(2, Math.round(r.w * vw)), sh = Math.max(2, Math.round(r.h * vh));
 
-  // Analyse a thumbnail of the region, not the region: 192px on the long edge
-  // is plenty to see a person move and costs a fraction of a millisecond.
-  const scale = Math.min(1, 192 / Math.max(sw, sh));
+  // Normally we analyse a thumbnail of the region rather than the region: 192px
+  // on the long edge is plenty to see a person move and costs a fraction of a
+  // millisecond. Pixel-exact mode does the opposite — 1:1, because a downscale
+  // averages a single changed pixel into its neighbours and hides it.
+  const exact = !!settings.pixelExact;
+  const scale = exact
+    ? Math.min(1, Math.sqrt(EXACT_MAX_PIXELS / (sw * sh)))
+    : Math.min(1, 192 / Math.max(sw, sh));
   const aw = Math.max(8, Math.round(sw * scale));
   const ah = Math.max(8, Math.round(sh * scale));
   if (work.width !== aw || work.height !== ah) {
@@ -143,8 +179,11 @@ function sample() {
     work.height = ah;
     bufA = new Uint8Array(aw * ah);
     bufB = new Uint8Array(aw * ah);
+    prevRGBA = new Uint8ClampedArray(aw * ah * 4);
     prevGray = null; // the old baseline describes a different rectangle
+    hasExactBaseline = false;
   }
+  lastAnalysis = { aw, ah, sw, sh, exact, capped: exact && scale < 1 };
 
   let data;
   try {
@@ -154,12 +193,26 @@ function sample() {
     return; // a frame between resolution changes; the next one will be fine
   }
 
-  const curr = toGray(data, useA ? bufA : bufB);
-  const diff = frameDiff(prevGray, curr, aw, ah, params.pixelThreshold);
-  prevGray = curr;
-  useA = !useA;
+  let diff;
+  if (exact) {
+    // getImageData hands back a fresh buffer every call, so the baseline is a
+    // persistent copy rather than a kept reference — one memcpy, no per-frame
+    // allocation of a multi-megabyte array.
+    diff = hasExactBaseline
+      ? frameDiffRGBA(prevRGBA, data, aw, ah, params.pixelThreshold)
+      : { changed: 0, total: aw * ah, ratio: 0, bbox: null };
+    prevRGBA.set(data);
+    hasExactBaseline = true;
+    prevGray = null;
+  } else {
+    const curr = toGray(data, useA ? bufA : bufB);
+    diff = frameDiff(prevGray, curr, aw, ah, params.pixelThreshold);
+    prevGray = curr;
+    useA = !useA;
+    hasExactBaseline = false;
+  }
 
-  const snap = gate.update(diff.ratio, performance.now());
+  const snap = gate.update(diff, performance.now());
   paint(snap, diff, { aw, ah });
   if (snap.fired) onMotion(snap, diff);
 }
@@ -171,7 +224,7 @@ function sample() {
 function arm() {
   if (!stream) return;
   alarm.ensure(); // this click is the gesture that unlocks audio
-  prevGray = null;
+  resetBaseline();
   gate.arm(performance.now());
   api.setState({ armed: true, alarming: false });
   paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
@@ -237,20 +290,30 @@ function paint(snap, diff, dims) {
     : state === STATE.WATCHING ? `${snap.triggers} trigger${snap.triggers === 1 ? '' : 's'} so far`
     : '';
 
-  // Meter: the trip line sits at a third of the trough, so a ratio three times
-  // the threshold fills it. Absolute percentages are in the legend.
-  const trip = params.minAreaPct / 100;
+  // Meter: the trip line sits at a third of the trough, so a sample three times
+  // the threshold fills it. The trip point is whichever of the two thresholds
+  // bites first — the area percentage, or the absolute pixel floor.
+  const total = diff.total || lastAnalysis.aw * lastAnalysis.ah || 0;
+  const tripPixels = Math.max(
+    settings.minChangedPixels,
+    total ? Math.ceil((params.minAreaPct / 100) * total) : 1
+  );
+  const trip = total ? tripPixels / total : params.minAreaPct / 100;
   const shown = Math.min(1, diff.ratio / (trip * 3 || 1));
   $('meterFill').style.width = `${(shown * 100).toFixed(1)}%`;
   $('meterTick').style.left = '33.3%';
-  $('meterNow').textContent = `${(diff.ratio * 100).toFixed(2)}% moving`;
-  $('meterTrip').textContent = `trips at ${pct(params.minAreaPct)}%`;
+  // Pixel counts, not just percentages: at a high multiplier the percentage is
+  // all zeroes and the only readable number is "how many pixels moved".
+  const changed = diff.changed ?? 0;
+  $('meterNow').textContent = `${changed} px moving · ${(diff.ratio * 100).toFixed(2)}%`;
+  $('meterTrip').textContent = `trips at ${tripPixels} px`;
 
   const region = $('region');
   region.classList.toggle('armed', snap.armed && !snap.alarming);
   region.classList.toggle('hit', snap.alarming);
 
   if (dims && diff.bbox && snap.armed) showBlob(diff.bbox, dims);
+  if (dims) showAnalysisHint();
   if (state !== STATE.ALARM) {
     if (alarm.playing) alarm.stop();
     hideBanner();
@@ -390,7 +453,7 @@ function setupRegionEditing() {
     r.w = Math.max(MIN, Math.min(r.w, 1 - r.x));
     r.h = Math.max(MIN, Math.min(r.h, 1 - r.y));
     settings.region = r;
-    prevGray = null; // the baseline belongs to the old rectangle
+    resetBaseline(); // the baseline belongs to the old rectangle
     layoutRegion();
   });
 
@@ -498,11 +561,15 @@ function bindControls() {
       const v = mapOut(Number(el.value));
       $(valId).textContent = format(v);
       patch({ [key]: v });
-      if (key === 'sensitivity') showSensHint();
+      if (['sensitivity', 'sensitivityBoost', 'minChangedPixels'].includes(key)) showSensHint();
     });
   };
 
   slider('sens', 'sensVal', 'sensitivity', (v) => String(v));
+  // The multiplier slider is geometric: ×1 at one end, ×1000 at the other, so
+  // the useful decade-by-decade range is spread evenly across the travel.
+  slider('boost', 'boostVal', 'sensitivityBoost', (v) => `×${v}`, sliderFromBoost, boostFromSlider);
+  slider('minPx', 'minPxVal', 'minChangedPixels', (v) => `${v} px`);
   slider('hold', 'holdVal', 'holdFrames', (v) => String(v));
   slider('warm', 'warmVal', 'warmupMs', (v) => `${Math.round(v / 1000)}s`, (v) => v / 1000, (v) => v * 1000);
   slider('cool', 'coolVal', 'cooldownMs', (v) => `${Math.round(v / 1000)}s`, (v) => v / 1000, (v) => v * 1000);
@@ -519,6 +586,10 @@ function bindControls() {
     });
   };
   toggle('tHold', 'holdUntilDismissed', (on) => ($('alarmMsField').style.opacity = on ? '0.4' : '1'));
+  toggle('tExact', 'pixelExact', () => {
+    resetBaseline(); // the old baseline is a thumbnail, or was one
+    showSensHint();
+  });
   toggle('tNotify', 'notify');
   toggle('tFlash', 'flashWindow');
   toggle('tTray', 'minimizeToTray');
@@ -540,12 +611,12 @@ function bindControls() {
   $('btnArm').addEventListener('click', () => (gate.armed ? disarm() : arm()));
   $('btnWhole').addEventListener('click', () => {
     patch({ region: { x: 0, y: 0, w: 1, h: 1 } }, { immediate: true });
-    prevGray = null;
+    resetBaseline();
     layoutRegion();
   });
   $('btnCentre').addEventListener('click', () => {
     patch({ region: { x: 1 / 3, y: 1 / 3, w: 1 / 3, h: 1 / 3 } }, { immediate: true });
-    prevGray = null;
+    resetBaseline();
     layoutRegion();
   });
 
@@ -565,9 +636,34 @@ function bindControls() {
 }
 
 function showSensHint() {
+  const what = settings.pixelExact ? 'in any colour channel' : 'in brightness';
+  const how =
+    params.pixelThreshold === 0
+      ? `changes at all ${what}`
+      : `changes by more than ${params.pixelThreshold} of 255 ${what}`;
   $('sensHint').textContent =
-    `Fires when at least ${pct(params.minAreaPct)}% of the area changes by more than ` +
-    `${params.pixelThreshold} of 255 in brightness. Lower it if your own cursor keeps tripping it.`;
+    `Fires when at least ${pct(params.minAreaPct)}% of the area — and at least ` +
+    `${settings.minChangedPixels} pixel${settings.minChangedPixels === 1 ? '' : 's'} — ${how}.`;
+  showAnalysisHint();
+}
+
+// What the detector is actually looking at, in numbers: the difference between
+// "one pixel changed" and "one pixel of a thumbnail changed" is the whole point
+// of pixel-exact mode, so it is stated rather than implied.
+function showAnalysisHint() {
+  const a = lastAnalysis;
+  if (!a.aw) {
+    $('analysisHint').textContent = '';
+    return;
+  }
+  const region = `${a.sw}×${a.sh}`;
+  if (!a.exact) {
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} downscaled from ${region} — one sample covers ~${Math.max(1, Math.round(a.sw / a.aw))}×${Math.max(1, Math.round(a.sh / a.ah))} screen pixels`;
+  } else if (a.capped) {
+    $('analysisHint').textContent = `region too large for 1:1 — analysing ${a.aw}×${a.ah} of ${region}. Draw a smaller area for true pixel-exact watching.`;
+  } else {
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} at 1:1 — one sample is one screen pixel`;
+  }
 }
 
 // One rAF-throttled pointer listener drives every card's sheen (DESIGN §5:

@@ -16,6 +16,11 @@ makes a noise when the pixels in it change.
 *Shown running against the built-in mock desktop, the synthetic source the test
 harness uses.*
 
+![Pixel-exact mode at ×1000](docs/screenshots/pixel-exact.png)
+
+*Pixel-exact at ×1000: the region analysed 1:1, tripping at a single changed
+pixel.*
+
 ## What it does
 
 - **Watch any part of any screen or window.** Pick a source, drag a rectangle
@@ -23,6 +28,10 @@ harness uses.*
 - **Sound an alarm when it moves.** Four synthesised alarms — siren, beep,
   pulse, chime — with a volume you control, plus an optional desktop
   notification and a taskbar flash.
+- **Watch literal pixels when you need to.** A sensitivity multiplier up to
+  ×1000 takes the thresholds down to "any change at all", and pixel-exact mode
+  drops the downscaling entirely — the region is analysed 1:1 and compared
+  channel by channel, so a single pixel changing colour is a trigger.
 - **Not scream at every flicker.** A grace period after arming, a
   frames-in-a-row requirement before it fires, and a quiet time after each
   alarm, so a compression artefact or your own mouse leaving the room does not
@@ -63,6 +72,9 @@ do both without opening the window.
 | Setting | What it changes |
 | --- | --- |
 | **Sensitivity** | Both thresholds at once: how much a pixel's brightness must change, and how much of the area must change with it. At 0 it wants a person walking past; at 100 a cursor twitch will do it. |
+| **Sensitivity multiplier** | Divides both thresholds by ×1 to ×1000, geometrically. Past roughly ×8 the brightness threshold reaches zero — a change of one unit counts — and the area threshold falls below a single pixel of any realistic region. |
+| **Pixel-exact** | Analyses the region at 1:1 instead of a 192px thumbnail, and compares colour channels instead of brightness. Both halves matter: a downscale averages one changed pixel into its neighbours, and greyscale maps different colours onto the same luma, so a pixel that changes colour without changing brightness is invisible without this. Cost is linear in the region's area (5.8ms per sample at 1080p), so it is capped at 4 megapixels and says so when a region exceeds that. |
+| **Minimum changed pixels** | An absolute floor ANDed with the area threshold — what stops a boosted, pixel-exact setup from firing on one stray pixel of video noise. At 1 it is a no-op. |
 | **Frames before it fires** | How many consecutive samples must be over the threshold. Two is enough to reject codec noise; raise it if a video is playing next to the area you care about. |
 | **Grace period** | Motion during this window after arming is ignored — it is you leaving. |
 | **Quiet time** | How long the sentry stays silent after an alarm before it can fire again. |
@@ -76,9 +88,15 @@ either lower the sensitivity, or draw the area somewhere the pointer does not go
 Each sample draws **only the watched rectangle** into a small offscreen canvas
 (192px on the long edge), converts it to grayscale, and compares it with the
 previous sample. A pixel counts as moving when its brightness changed by more
-than the sensitivity's threshold; the fraction of moving pixels is the one
-number the whole UI is a view of. When that fraction stays over the area
-threshold for N consecutive samples, the alarm fires.
+than the sensitivity's threshold; the count of moving pixels — and the fraction
+of the region they make up — is the one measurement the whole UI is a view of.
+When it stays over both thresholds for N consecutive samples, the alarm fires.
+
+In **pixel-exact** mode the thumbnail step is skipped: the region is drawn at
+1:1 and the comparison runs over the raw RGBA channels, where a threshold of
+zero means one unit of difference in one channel of one pixel is a trigger. The
+meter reads in pixels as well as percent, because at a high multiplier the
+percentage is all zeroes and the only readable number is how many pixels moved.
 
 That is the entire algorithm, and it lives in
 [`src/renderer/detector.js`](src/renderer/detector.js) as pure functions over
@@ -120,6 +138,10 @@ Two environment switches make the app testable without a real screen:
   something moving in it on a 7-second cycle.
 - `NX_SENTRY_AUTOARM=1` — arm as soon as that mock source starts, so a headless
   screenshot can catch the live states.
+
+`NX_SENTRY_CONFIG_DIR` redirects Electron's own `userData` as well as
+`settings.json`, so a test run cannot take the single-instance lock from — or
+raise the window of — the copy you have installed.
 
 ```bash
 NX_SENTRY_MOCK=1 NX_SENTRY_AUTOARM=1 npm run headless

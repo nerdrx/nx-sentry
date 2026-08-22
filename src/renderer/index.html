@@ -103,7 +103,17 @@
             <span class="lbl">Sensitivity <span class="val" id="sensVal">55</span></span>
             <input type="range" id="sens" min="0" max="100" step="1" />
           </label>
+          <label class="field">
+            <span class="lbl">Sensitivity multiplier <span class="val" id="boostVal">×1</span></span>
+            <input type="range" id="boost" min="0" max="100" step="1" />
+          </label>
+          <label class="toggle"><input type="checkbox" id="tExact" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Pixel-exact: no downscaling, compare colour channels</label>
+          <label class="field mt-2">
+            <span class="lbl">Minimum changed pixels <span class="val" id="minPxVal">1</span></span>
+            <input type="range" id="minPx" min="1" max="250" step="1" />
+          </label>
           <p class="hint" id="sensHint"></p>
+          <p class="hint mono small" id="analysisHint"></p>
           <hr class="hairline" />
           <label class="field">
             <span class="lbl">Frames before it fires <span class="val" id="holdVal">2</span></span>
