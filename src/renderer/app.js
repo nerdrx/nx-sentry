@@ -62,6 +62,7 @@ let prevRGBA = null; // pixel-exact baseline: the previous frame's raw channels
 let hasExactBaseline = false;
 let blobTimer = null;
 let lastAnalysis = { aw: 0, ah: 0, sw: 0, sh: 0, exact: false, capped: false };
+let sampleCostMs = 0; // EMA of what one sample costs, in ms
 
 // Pixel-exact analysis reads and diffs every pixel of the region, so the cost
 // is linear in its area. Past this many pixels a sample would not finish inside
@@ -136,7 +137,7 @@ async function useStream(next) {
   };
   video.addEventListener('loadedmetadata', sizeStage);
   sizeStage();
-  restartSampling();
+  restartSampling({ force: true });
 }
 
 /** Forget the previous frame, in whichever mode holds it. */
@@ -148,12 +149,27 @@ function resetBaseline() {
 function stopStream() {
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null;
+  clearInterval(sampleTimer);
+  sampleTimer = null;
 }
 
-function restartSampling() {
+let samplingPeriod = 0;
+
+/**
+ * (Re)start the sample timer. Only the sample RATE can change it — every other
+ * setting is read fresh inside sample(). Rebuilding the interval on any change
+ * meant that dragging the sensitivity slider restarted the timer on every
+ * pointer event, so it never got to fire and the meter froze at exactly the
+ * moment you most want to watch it move.
+ */
+function restartSampling({ force = false } = {}) {
+  const period = Math.round(1000 / (settings?.analyzeFps || 8));
+  if (!force && sampleTimer && period === samplingPeriod && stream) return;
   clearInterval(sampleTimer);
+  sampleTimer = null;
   if (!stream) return;
-  sampleTimer = setInterval(sample, Math.round(1000 / (settings?.analyzeFps || 8)));
+  samplingPeriod = period;
+  sampleTimer = setInterval(sample, period);
 }
 
 function sample() {
@@ -185,6 +201,7 @@ function sample() {
   }
   lastAnalysis = { aw, ah, sw, sh, exact, capped: exact && scale < 1 };
 
+  const t0 = performance.now();
   let data;
   try {
     wctx.drawImage(video, sx, sy, sw, sh, 0, 0, aw, ah);
@@ -212,6 +229,12 @@ function sample() {
     hasExactBaseline = false;
   }
 
+  // Pixel-exact analysis is linear in the region's area, and a sample that
+  // takes longer than its own interval quietly starves the UI. Measure it and
+  // show it, so "the region is too big for this rate" is visible rather than
+  // felt as a sluggish window.
+  sampleCostMs = sampleCostMs ? sampleCostMs * 0.8 + (performance.now() - t0) * 0.2 : performance.now() - t0;
+
   const snap = gate.update(diff, performance.now());
   paint(snap, diff, { aw, ah });
   if (snap.fired) onMotion(snap, diff);
@@ -226,7 +249,6 @@ function arm() {
   alarm.ensure(); // this click is the gesture that unlocks audio
   resetBaseline();
   gate.arm(performance.now());
-  api.setState({ armed: true, alarming: false });
   paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
 }
 
@@ -234,7 +256,6 @@ function disarm() {
   gate.disarm();
   alarm.stop();
   hideBanner();
-  api.setState({ armed: false, alarming: false });
   paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
 }
 
@@ -242,7 +263,7 @@ function dismiss() {
   gate.dismiss(performance.now());
   alarm.stop();
   hideBanner();
-  api.setState({ armed: gate.armed, alarming: false });
+  paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
 }
 
 function onMotion(snap, diff) {
@@ -251,9 +272,12 @@ function onMotion(snap, diff) {
     durationMs: settings.alarmMs,
     hold: settings.holdUntilDismissed,
   });
-  api.setState({ armed: true, alarming: true });
-  const pct = (diff.ratio * 100).toFixed(2);
-  api.alert({ title: 'Motion detected', body: `${pct}% of the watched area changed.`, show: false });
+  const share = (diff.ratio * 100).toFixed(2);
+  api.alert({
+    title: 'Motion detected',
+    body: `${diff.changed ?? 0} pixels (${share}%) of the watched area changed.`,
+    show: false,
+  });
   logEvent(new Date(), diff.ratio);
   showBanner(new Date(), diff.ratio);
 }
@@ -276,8 +300,23 @@ function setChip(state, text) {
   $('stateChipText').textContent = text;
 }
 
+// The tray mirrors main's idea of the state, and main only learns it when the
+// renderer says so. Arming, firing and dismissing all reported themselves, but
+// an alarm that simply timed out into cooldown did not — so the tray sat on
+// "Motion detected", with "Silence alarm" still enabled, until the next manual
+// arm or disarm. Report every transition, and only transitions: this runs on
+// every sample, and an IPC call per frame is not free.
+let reportedState = null;
+function reportState(snap) {
+  const key = `${snap.armed}/${snap.alarming}`;
+  if (key === reportedState) return;
+  reportedState = key;
+  api.setState({ armed: snap.armed, alarming: snap.alarming });
+}
+
 function paint(snap, diff, dims) {
   const state = snap.state;
+  reportState(snap);
   setChip(state, LABEL[state]);
   $('stateBig').textContent = LABEL[state];
   $('btnArm').textContent = snap.state === STATE.IDLE ? 'Start watching' : 'Stop watching';
@@ -657,12 +696,21 @@ function showAnalysisHint() {
     return;
   }
   const region = `${a.sw}×${a.sh}`;
+  const cost = sampleCostMs >= 0.05 ? ` · ${sampleCostMs.toFixed(1)} ms/sample` : '';
+  const overrun = samplingPeriod && sampleCostMs > samplingPeriod * 0.8;
+  $('analysisHint').classList.toggle('warn', !!overrun);
+  if (overrun) {
+    $('analysisHint').textContent =
+      `analysing ${a.aw}×${a.ah}${cost} — that is more than one sample fits in at ` +
+      `${settings.analyzeFps}/s. Lower the sample rate or draw a smaller area.`;
+    return;
+  }
   if (!a.exact) {
-    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} downscaled from ${region} — one sample covers ~${Math.max(1, Math.round(a.sw / a.aw))}×${Math.max(1, Math.round(a.sh / a.ah))} screen pixels`;
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} downscaled from ${region}${cost} — one sample covers ~${Math.max(1, Math.round(a.sw / a.aw))}×${Math.max(1, Math.round(a.sh / a.ah))} screen pixels`;
   } else if (a.capped) {
-    $('analysisHint').textContent = `region too large for 1:1 — analysing ${a.aw}×${a.ah} of ${region}. Draw a smaller area for true pixel-exact watching.`;
+    $('analysisHint').textContent = `region too large for 1:1 — analysing ${a.aw}×${a.ah} of ${region}${cost}. Draw a smaller area for true pixel-exact watching.`;
   } else {
-    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} at 1:1 — one sample is one screen pixel`;
+    $('analysisHint').textContent = `analysing ${a.aw}×${a.ah} at 1:1${cost} — one sample is one screen pixel`;
   }
 }
 

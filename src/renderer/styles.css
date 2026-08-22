@@ -368,6 +368,7 @@ input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focu
 }
 .toast.error { background: linear-gradient(158deg, rgba(70, 22, 34, 0.94), rgba(34, 12, 20, 0.95)); }
 
+.hint.warn { color: var(--amber); }
 .mono { font-family: var(--mono); }
 .small { font-size: 12px; }
 .mt-2 { margin-top: var(--sp-2); }
