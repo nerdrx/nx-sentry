@@ -1,0 +1,75 @@
+/* NX design language — "liquid glass on deep space". Tokens copied verbatim
+   from nx-hub/docs/DESIGN.md v1.5 (§2). Frozen brand values: never restyle
+   them, compose with them.
+
+   NX Sentry has no app-specific identity accent — violet leads, cyan is the
+   live motion value inside the meter, amber means "attention" (the alarm), and
+   red is kept for genuine failures like a capture stream dying. */
+:root {
+  /* brand (frozen) */
+  --bg-top: #0a0714;
+  --bg-bottom: #12091f;
+  --panel: #171028;
+  --panel-2: #1d1433;
+  --violet: #7700ff;
+  --violet-soft: #9a3cff;
+  --cyan: #00e5ff;
+  --amber: #ffb300;
+  --text: #efeaff;
+  --muted: #9a8fc0;
+  --line: #2a1f45;
+  --danger: #ff5470;
+
+  /* geometry — ANGULAR. Radii 3–6px, pills banned, circles only for dots. */
+  --radius: 6px;
+  --radius-sm: 4px;
+  --radius-xs: 3px;
+  --pill: 5px;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Cantarell, sans-serif;
+  --mono: ui-monospace, "JetBrains Mono", "Fira Code", Consolas, monospace;
+
+  /* glass fills — light collects top-left and drains to a cool shadow */
+  --glass-bar: linear-gradient(180deg, rgba(46, 30, 78, 0.62) 0%, rgba(18, 11, 34, 0.72) 100%);
+  --glass-1: linear-gradient(157deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.026) 34%, rgba(23, 16, 40, 0.34) 100%);
+  --glass-2: linear-gradient(158deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 30%, rgba(19, 12, 34, 0.66) 100%);
+  --glass-chip: linear-gradient(180deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.028) 100%);
+  --well: linear-gradient(180deg, rgba(7, 4, 16, 0.5) 0%, rgba(7, 4, 16, 0.32) 100%);
+  --well-deep: linear-gradient(180deg, rgba(4, 2, 10, 0.62) 0%, rgba(4, 2, 10, 0.46) 100%);
+
+  /* v1.5 — structural surfaces are OPAQUE elevation steps */
+  --surface-1: linear-gradient(157deg, #221739 0%, #1a1130 44%, #140c24 100%);
+  --surface-1-hover: linear-gradient(157deg, #271b41 0%, #1d1335 44%, #170e29 100%);
+
+  /* blur strengths — ONLY these three exist */
+  --blur-bar: blur(22px) saturate(170%);
+  --blur-sheet: blur(34px) saturate(185%);
+  --blur-chip: blur(16px) saturate(160%);
+
+  /* lit edges — 1px gradient borders, bright top-left → dark bottom-right */
+  --edge: linear-gradient(147deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.09) 24%, rgba(255, 255, 255, 0.015) 52%, rgba(0, 0, 0, 0.34) 100%);
+  --edge-lit: linear-gradient(147deg, rgba(226, 200, 255, 0.62) 0%, rgba(154, 60, 255, 0.28) 30%, rgba(0, 229, 255, 0.1) 58%, rgba(0, 0, 0, 0.3) 100%);
+  --edge-top: rgba(255, 255, 255, 0.18);
+  --hairline: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, 0.09) 18%, rgba(255, 255, 255, 0.13) 50%, rgba(255, 255, 255, 0.09) 82%, rgba(255, 255, 255, 0) 100%);
+  --sheen: linear-gradient(112deg, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0.085) 45%, rgba(214, 190, 255, 0.05) 52%, rgba(255, 255, 255, 0) 68%);
+
+  /* elevation */
+  --shadow: 0 14px 34px -12px rgba(0, 0, 0, 0.72), 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-lift: 0 26px 54px -16px rgba(0, 0, 0, 0.8), 0 0 40px -8px rgba(119, 0, 255, 0.34);
+  --shadow-bar: 0 20px 44px -24px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.04);
+  --shadow-sheet: 0 48px 96px -32px rgba(0, 0, 0, 0.86), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --focus-ring: 0 0 0 2px rgba(119, 0, 255, 0.6), 0 0 0 5px rgba(119, 0, 255, 0.2);
+
+  /* motion */
+  --ease-spring: cubic-bezier(0.32, 1.35, 0.42, 1);
+  --ease-soft: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 150ms;
+  --dur: 220ms;
+  --dur-slow: 320ms;
+
+  /* 8px rhythm */
+  --sp-1: 8px;
+  --sp-2: 16px;
+  --sp-3: 24px;
+  --sp-4: 32px;
+}

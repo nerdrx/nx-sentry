@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; media-src 'self' blob: mediastream:;" />
+  <title>NX Sentry</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="nebula"></div>
+  <div class="stars"></div>
+  <div class="vignette"></div>
+
+  <div class="app">
+    <header class="bar">
+      <!-- the NX mark: pointy-top hexagon, beveled glass crystal -->
+      <svg class="mark" viewBox="0 0 52 58" aria-hidden="true">
+        <defs>
+          <linearGradient id="mk" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#c9a6ff" /><stop offset="0.45" stop-color="#7700ff" /><stop offset="1" stop-color="#2c0a5c" />
+          </linearGradient>
+          <linearGradient id="mkEdge" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#efe4ff" stop-opacity="0.85" /><stop offset="0.5" stop-color="#9a3cff" stop-opacity="0.35" /><stop offset="1" stop-color="#000" stop-opacity="0.4" />
+          </linearGradient>
+        </defs>
+        <path d="M26 1 50 15v28L26 57 2 43V15Z" fill="url(#mk)" stroke="url(#mkEdge)" stroke-width="1.5" />
+        <path d="M26 6 45 17.5v23L26 52 7 40.5v-23Z" fill="none" stroke="#efeaff" stroke-opacity="0.18" />
+        <!-- the sentry's eye: an aperture watching a rectangle -->
+        <circle cx="26" cy="29" r="8.5" fill="none" stroke="#efeaff" stroke-width="2.2" />
+        <circle cx="26" cy="29" r="3.2" fill="#00e5ff" />
+      </svg>
+      <div>
+        <h1>NX Sentry</h1>
+        <div class="sub" id="barSub">Watching a rectangle of your screen</div>
+      </div>
+      <span class="chip" id="stateChip" data-state="idle"><span class="dot"></span><span id="stateChipText">Idle</span></span>
+      <div class="spacer"></div>
+      <button id="btnSource">Choose what to watch</button>
+      <button id="btnTray" class="ghost" title="Keep watching from the tray">Hide to tray</button>
+    </header>
+
+    <main>
+      <div class="left">
+      <section class="card" id="watchCard">
+        <h2>Watch area</h2>
+        <div class="stage-wrap">
+          <div class="stage" id="stage">
+            <video id="video" autoplay muted playsinline></video>
+            <div class="scrim" id="scrim">
+              <div>
+                <div class="empty-title">Nothing is being watched yet</div>
+                <p class="empty-body">Pick a screen or a window, then drag a rectangle over the part you care about — a door, a progress bar, a chat window. NX Sentry sounds an alarm when the pixels inside it change.</p>
+                <button class="primary" id="btnSourceEmpty">Choose what to watch</button>
+              </div>
+            </div>
+            <div class="region" id="region" hidden>
+              <span class="tag mono" id="regionTag">—</span>
+              <span class="grip" data-dir="nw"></span><span class="grip" data-dir="ne"></span>
+              <span class="grip" data-dir="sw"></span><span class="grip" data-dir="se"></span>
+              <div class="blob" id="blob" hidden></div>
+            </div>
+          </div>
+        </div>
+        <div class="row mt-2">
+          <button id="btnWhole">Whole screen</button>
+          <button id="btnCentre">Centre third</button>
+          <span class="muted small" id="sourceName">No source</span>
+        </div>
+        <hr class="hairline" />
+        <p class="hint" id="watchHint">Drag on the preview to draw the area. Drag inside it to move it, or grab a corner to resize.</p>
+      </section>
+
+      <section class="card">
+        <h2>Events</h2>
+        <ul class="log" id="log"><li class="empty">No motion recorded yet.</li></ul>
+      </section>
+      </div>
+
+      <div class="rail">
+        <section class="card">
+          <h2>Sentry</h2>
+          <div class="state-line">
+            <span class="big-state" id="stateBig">Idle</span>
+            <span class="muted mono" id="stateDetail"></span>
+          </div>
+          <button class="primary big" id="btnArm" disabled>Start watching</button>
+          <hr class="hairline" />
+          <div class="meter" id="meter">
+            <div class="fill" id="meterFill"></div>
+            <div class="tick" id="meterTick"></div>
+          </div>
+          <div class="meter-legend">
+            <span id="meterNow">0.00% moving</span>
+            <span id="meterTrip">trips at 0.35%</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Detection</h2>
+          <label class="field">
+            <span class="lbl">Sensitivity <span class="val" id="sensVal">55</span></span>
+            <input type="range" id="sens" min="0" max="100" step="1" />
+          </label>
+          <p class="hint" id="sensHint"></p>
+          <hr class="hairline" />
+          <label class="field">
+            <span class="lbl">Frames before it fires <span class="val" id="holdVal">2</span></span>
+            <input type="range" id="hold" min="1" max="10" step="1" />
+          </label>
+          <label class="field">
+            <span class="lbl">Grace period after arming <span class="val" id="warmVal">3s</span></span>
+            <input type="range" id="warm" min="0" max="30" step="1" />
+          </label>
+          <label class="field">
+            <span class="lbl">Quiet time after an alarm <span class="val" id="coolVal">8s</span></span>
+            <input type="range" id="cool" min="0" max="120" step="1" />
+          </label>
+          <label class="field">
+            <span class="lbl">Samples per second <span class="val" id="fpsVal">8</span></span>
+            <input type="range" id="fps" min="1" max="20" step="1" />
+          </label>
+        </section>
+
+        <section class="card">
+          <h2>Alarm</h2>
+          <div class="seg" id="sounds">
+            <button data-sound="siren">Siren</button>
+            <button data-sound="beep">Beep</button>
+            <button data-sound="pulse">Pulse</button>
+            <button data-sound="chime">Chime</button>
+          </div>
+          <div class="spacer-2"></div>
+          <label class="field">
+            <span class="lbl">Volume <span class="val" id="volVal">60%</span></span>
+            <input type="range" id="vol" min="0" max="100" step="1" />
+          </label>
+          <label class="field" id="alarmMsField">
+            <span class="lbl">Alarm length <span class="val" id="lenVal">4s</span></span>
+            <input type="range" id="len" min="1" max="60" step="1" />
+          </label>
+          <label class="toggle"><input type="checkbox" id="tHold" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Keep sounding until I stop it</label>
+          <label class="toggle"><input type="checkbox" id="tNotify" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Desktop notification</label>
+          <label class="toggle"><input type="checkbox" id="tFlash" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Flash the window in the taskbar</label>
+          <label class="toggle"><input type="checkbox" id="tTray" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Closing the window keeps it watching in the tray</label>
+          <hr class="hairline" />
+          <div class="row"><button id="btnTest">Test the alarm</button><span class="muted small">Press Esc to silence a live alarm.</span></div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

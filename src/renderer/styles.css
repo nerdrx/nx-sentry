@@ -1,0 +1,387 @@
+/* NX Sentry — components composed from tokens.css. Follows DESIGN.md v1.5:
+   structural surfaces (cards) are opaque elevation steps with a 1px lit edge,
+   real backdrop-filter is spent only on the header bar and the alarm sheet,
+   every sheen is pointer-bound, and nothing is rounder than 6px. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font);
+  color: var(--text);
+  background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------------------------------------------------------------- the field */
+/* Two fixed layers below everything: a drifting nebula and a static starfield.
+   Transform-only animation, 60–110s periods, frozen under reduced motion. */
+.nebula, .stars { position: fixed; inset: -20%; pointer-events: none; z-index: 0; }
+.nebula {
+  background:
+    radial-gradient(46% 40% at 26% 18%, rgba(119, 0, 255, 0.30) 0%, rgba(119, 0, 255, 0) 70%),
+    radial-gradient(40% 38% at 78% 76%, rgba(0, 229, 255, 0.13) 0%, rgba(0, 229, 255, 0) 72%),
+    radial-gradient(52% 44% at 62% 12%, rgba(190, 40, 220, 0.10) 0%, rgba(190, 40, 220, 0) 70%);
+  animation: drift 92s var(--ease-soft) infinite alternate;
+}
+.stars {
+  background-image:
+    radial-gradient(1px 1px at 12% 22%, rgba(255, 255, 255, 0.5) 50%, transparent 51%),
+    radial-gradient(1px 1px at 32% 62%, rgba(255, 255, 255, 0.35) 50%, transparent 51%),
+    radial-gradient(1px 1px at 54% 18%, rgba(255, 255, 255, 0.4) 50%, transparent 51%),
+    radial-gradient(1px 1px at 71% 44%, rgba(255, 255, 255, 0.28) 50%, transparent 51%),
+    radial-gradient(1px 1px at 86% 71%, rgba(255, 255, 255, 0.42) 50%, transparent 51%),
+    radial-gradient(1px 1px at 24% 84%, rgba(255, 255, 255, 0.3) 50%, transparent 51%),
+    radial-gradient(1px 1px at 92% 26%, rgba(255, 255, 255, 0.24) 50%, transparent 51%);
+  animation: drift-slow 110s linear infinite alternate;
+}
+/* vignette — edges stay darker than the centre */
+.vignette {
+  position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 40%, rgba(3, 1, 8, 0.55) 100%);
+}
+@keyframes drift {
+  from { transform: translate3d(-2%, -1%, 0) scale(1.02); }
+  to   { transform: translate3d(3%, 2%, 0) scale(1.08); }
+}
+@keyframes drift-slow {
+  from { transform: translate3d(1%, 1%, 0); }
+  to   { transform: translate3d(-2%, -2%, 0); }
+}
+
+/* ---------------------------------------------------------------- structure */
+.app { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100%; }
+
+.bar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 10px var(--sp-3);
+  background: var(--glass-bar);
+  backdrop-filter: var(--blur-bar);
+  -webkit-backdrop-filter: var(--blur-bar);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: var(--shadow-bar);
+}
+.bar::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px;
+  background: var(--edge-top);
+}
+.bar .mark { width: 26px; height: 29px; flex: none; }
+.bar h1 { font-size: 15px; font-weight: 700; letter-spacing: 0.01em; margin: 0; }
+.bar .sub { color: var(--muted); font-size: 12px; }
+.bar .spacer { flex: 1; }
+
+main {
+  flex: 1; min-height: 0;
+  display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(360px, 0.85fr);
+  gap: var(--sp-3); padding: var(--sp-3);
+  max-width: 2200px; width: 100%; margin: 0 auto;
+  align-items: start;   /* cards size to their content; no stretched dead space */
+  overflow: auto;
+}
+
+/* scrollbars belong to the design too — a bright native bar on deep space is
+   the first thing that gives away "just a web page in a window". */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(154, 60, 255, 0.5), rgba(119, 0, 255, 0.28));
+  border-radius: var(--radius-xs); border: 2px solid transparent; background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: linear-gradient(180deg, rgba(170, 90, 255, 0.7), rgba(119, 0, 255, 0.45)); background-clip: padding-box; }
+@media (max-width: 1060px) { main { grid-template-columns: minmax(0, 1fr); } }
+.rail, .left { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+
+/* -------------------------------------------------------------------- cards */
+.card {
+  position: relative; isolation: isolate;
+  background: var(--surface-1);           /* v1.5: opaque, never see-through */
+  border-radius: var(--radius);
+  padding: var(--sp-3);
+  box-shadow: var(--shadow);
+  transition: box-shadow var(--dur) var(--ease-soft);
+}
+/* the 1px lit edge — brighter top-left, dark bottom-right */
+.card::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: var(--edge);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude;
+  pointer-events: none;
+}
+/* the sheen is POSITION-BOUND: --mx/--my are written by one rAF-throttled
+   pointermove listener, so the highlight slides with the cursor instead of
+   sweeping once on hover (DESIGN §5, "light rides motion"). */
+.card::after {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(38% 60% at calc(var(--mx, 0.5) * 100%) calc(var(--my, 0.5) * 100%),
+    rgba(255, 255, 255, 0.07) 0%, rgba(214, 190, 255, 0.03) 45%, transparent 72%);
+  opacity: 0; transition: opacity var(--dur) var(--ease-soft);
+}
+.card:hover::after { opacity: 1; }
+.card h2 {
+  margin: 0 0 var(--sp-2); font-size: 13px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted);
+}
+.card .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+
+.hairline { height: 1px; background: var(--hairline); border: 0; margin: var(--sp-2) 0; }
+
+/* ------------------------------------------------------------------ buttons */
+button {
+  font: inherit; color: var(--text); cursor: pointer;
+  border: 1px solid transparent; border-radius: var(--pill);
+  padding: 9px 14px;
+  background: var(--glass-chip);
+  position: relative;
+  transition: transform var(--dur-fast) var(--ease-soft), box-shadow var(--dur) var(--ease-soft),
+    background var(--dur) var(--ease-soft), opacity var(--dur-fast) linear;
+}
+button::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: var(--edge);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+}
+button:hover { transform: translateY(-1px); background: rgba(255, 255, 255, 0.075); }
+button:active { transform: scale(0.96); }
+button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+button:disabled { opacity: 0.4; pointer-events: none; }
+
+button.primary {
+  background: linear-gradient(180deg, #8b23ff 0%, #6a00e0 100%);
+  box-shadow: 0 6px 20px -8px rgba(119, 0, 255, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  font-weight: 600;
+}
+button.primary:hover { box-shadow: 0 10px 28px -8px rgba(119, 0, 255, 1), inset 0 1px 0 rgba(255, 255, 255, 0.34); }
+button.amber {
+  background: linear-gradient(180deg, #ffc233 0%, #e09400 100%);
+  color: #1a1000; font-weight: 700;
+  box-shadow: 0 6px 20px -8px rgba(255, 179, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+button.big { width: 100%; padding: 15px; font-size: 15px; letter-spacing: 0.02em; }
+button.ghost { background: transparent; }
+.row { display: flex; gap: var(--sp-1); flex-wrap: wrap; align-items: center; }
+
+/* -------------------------------------------------------------------- chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase;
+  padding: 5px 9px; border-radius: var(--pill);
+  background: var(--glass-chip); color: var(--muted);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.chip .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.chip[data-state="watching"] { color: var(--cyan); }
+.chip[data-state="warmup"] { color: var(--violet-soft); }
+.chip[data-state="alarm"] { color: var(--amber); }
+.chip[data-state="cooldown"] { color: var(--muted); }
+.chip[data-state="error"] { color: var(--danger); }
+.chip[data-state="alarm"] .dot { animation: blink 900ms steps(2, end) infinite; }
+@keyframes blink { 50% { opacity: 0.15; } }
+
+/* segmented control — chips that toggle */
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg button { padding: 7px 11px; font-size: 12px; }
+.seg button[aria-pressed="true"] {
+  background: linear-gradient(180deg, rgba(139, 35, 255, 0.5) 0%, rgba(106, 0, 224, 0.42) 100%);
+  color: var(--text);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+/* ------------------------------------------------------------------- fields */
+label.field { display: block; margin-bottom: var(--sp-2); }
+label.field:last-child { margin-bottom: 0; }
+.field .lbl {
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-1);
+  font-size: 12px; color: var(--muted); margin-bottom: 6px;
+}
+.field .val { font-family: var(--mono); font-size: 12px; color: var(--text); }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 20px;
+  background: transparent; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px; border-radius: var(--radius-xs);
+  background: var(--well-deep);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7), inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; margin-top: -4px; border-radius: var(--radius-xs);
+  background: linear-gradient(180deg, #a45cff 0%, #7700ff 100%);
+  box-shadow: 0 2px 8px -2px rgba(119, 0, 255, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+input[type="range"]:focus-visible { outline: none; }
+input[type="range"]:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus-ring); }
+
+.toggle { display: flex; align-items: center; gap: 10px; padding: 7px 0; cursor: pointer; font-size: 13px; }
+.toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.toggle .box {
+  width: 16px; height: 16px; flex: none; border-radius: var(--radius-xs);
+  background: var(--well-deep); border: 1px solid var(--line);
+  display: grid; place-items: center;
+  transition: background var(--dur-fast) var(--ease-soft), border-color var(--dur-fast) var(--ease-soft);
+}
+.toggle input:checked + .box {
+  background: linear-gradient(180deg, #8b23ff 0%, #6a00e0 100%); border-color: transparent;
+}
+.toggle .box svg { opacity: 0; transition: opacity var(--dur-fast) linear; }
+.toggle input:checked + .box svg { opacity: 1; }
+.toggle input:focus-visible + .box { box-shadow: var(--focus-ring); }
+
+/* --------------------------------------------------------------- the stage */
+.stage-wrap { position: relative; background: var(--well-deep); border-radius: var(--radius-sm); padding: var(--sp-1); }
+.stage {
+  position: relative; width: 100%; aspect-ratio: 16 / 9;
+  background: #05030c; border-radius: var(--radius-xs); overflow: hidden;
+  cursor: crosshair; touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+.stage video { width: 100%; height: 100%; display: block; object-fit: fill; }
+.stage .scrim {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  padding: var(--sp-3); gap: var(--sp-1);
+  background: radial-gradient(60% 60% at 50% 40%, rgba(119, 0, 255, 0.12), transparent 70%);
+}
+.stage .scrim.hidden { display: none; }
+.empty-title { font-size: 16px; font-weight: 700; }
+.empty-body { color: var(--muted); font-size: 13px; max-width: 42ch; margin: 6px auto var(--sp-2); line-height: 1.55; }
+
+/* the watched rectangle — a violet cut-out with corner grips */
+.region {
+  position: absolute; border: 1px solid rgba(154, 60, 255, 0.95);
+  background: rgba(119, 0, 255, 0.07);
+  box-shadow: 0 0 0 9999px rgba(4, 2, 10, 0.55), 0 0 22px -4px rgba(119, 0, 255, 0.8);
+  cursor: move;
+}
+.region .grip {
+  position: absolute; width: 11px; height: 11px; background: var(--violet-soft);
+  border: 1px solid rgba(255, 255, 255, 0.7); border-radius: 2px;
+}
+.region .grip[data-dir="nw"] { left: -6px; top: -6px; cursor: nwse-resize; }
+.region .grip[data-dir="ne"] { right: -6px; top: -6px; cursor: nesw-resize; }
+.region .grip[data-dir="sw"] { left: -6px; bottom: -6px; cursor: nesw-resize; }
+.region .grip[data-dir="se"] { right: -6px; bottom: -6px; cursor: nwse-resize; }
+.region .tag {
+  position: absolute; left: 0; top: -22px; font-family: var(--mono); font-size: 11px;
+  color: var(--text); background: rgba(10, 7, 20, 0.8); padding: 2px 6px; border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+.region.armed { border-color: rgba(0, 229, 255, 0.9); box-shadow: 0 0 0 9999px rgba(4, 2, 10, 0.62), 0 0 26px -4px rgba(0, 229, 255, 0.7); }
+.region.hit { border-color: var(--amber); }
+
+/* where the motion was, inside the region */
+.blob {
+  position: absolute; border: 1px solid var(--amber); border-radius: 2px;
+  background: rgba(255, 179, 0, 0.1); pointer-events: none;
+  transition: opacity var(--dur-slow) var(--ease-soft);
+}
+
+/* --------------------------------------------------------------- the meter */
+.meter { position: relative; height: 12px; border-radius: var(--radius-xs); background: var(--well-deep);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.8), inset 0 0 0 1px rgba(255, 255, 255, 0.04); overflow: hidden; }
+.meter .fill {
+  position: absolute; inset: 1px auto 1px 1px; width: 0;
+  background: linear-gradient(90deg, var(--violet) 0%, var(--cyan) 100%);
+  border-radius: 2px;
+  box-shadow: 0 0 12px -2px rgba(0, 229, 255, 0.7);
+  transform-origin: left center;
+  transition: width 120ms linear;
+}
+/* the trip line: where the current sensitivity starts calling it motion */
+.meter .tick { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--amber); opacity: 0.85; }
+.meter-legend { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 6px; }
+
+/* ------------------------------------------------------------------ the log */
+.log { list-style: none; margin: 0; padding: 0; max-height: 210px; overflow: auto; }
+.log li {
+  display: flex; align-items: baseline; gap: var(--sp-1);
+  padding: 7px var(--sp-1); border-radius: var(--radius-xs);
+  background: var(--well); margin-bottom: 5px; font-size: 12px;
+}
+.log li .t { font-family: var(--mono); color: var(--cyan); }
+.log li .d { color: var(--muted); margin-left: auto; font-family: var(--mono); }
+.log .empty { color: var(--muted); font-size: 12px; padding: var(--sp-1); }
+
+/* --------------------------------------------------------------- the sheet */
+/* Source picker and the alarm banner: the only real-blur surfaces besides the
+   header, fill alpha ≥ 0.85 so nothing shows through the body. */
+.scrim-full {
+  position: fixed; inset: 0; z-index: 5; display: grid; place-items: center;
+  background: rgba(4, 2, 10, 0.6); backdrop-filter: blur(3px);
+  animation: fade var(--dur) var(--ease-out);
+}
+.sheet {
+  width: min(760px, 92vw); max-height: 82vh; overflow: auto; padding: var(--sp-3);
+  border-radius: var(--radius); position: relative;
+  background: linear-gradient(158deg, rgba(38, 26, 64, 0.95) 0%, rgba(22, 15, 40, 0.96) 100%);
+  backdrop-filter: var(--blur-sheet); -webkit-backdrop-filter: var(--blur-sheet);
+  box-shadow: var(--shadow-sheet);
+  animation: rise var(--dur-slow) var(--ease-out);
+}
+.sheet::before {
+  content: ""; position: absolute; inset: 0; border-radius: inherit; padding: 1px;
+  background: var(--edge-lit);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor; mask-composite: exclude; pointer-events: none;
+}
+.sheet h2 { margin-top: 0; }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+.sources { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--sp-2); }
+.source {
+  padding: 0; overflow: hidden; text-align: left; background: var(--surface-1);
+  border-radius: var(--radius-sm); display: flex; flex-direction: column;
+}
+.source:hover { background: var(--surface-1-hover); }
+.source img { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: #05030c; display: block; }
+.source .meta { padding: 9px 11px; }
+.source .nm { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.source .kd { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+
+/* the alarm banner — amber means attention (red stays for failures) */
+.banner {
+  position: fixed; left: 50%; bottom: var(--sp-3); transform: translateX(-50%); z-index: 6;
+  display: flex; align-items: center; gap: var(--sp-2); padding: 12px 14px; min-width: 340px;
+  border-radius: var(--radius);
+  background: linear-gradient(158deg, rgba(58, 40, 12, 0.94) 0%, rgba(30, 20, 8, 0.95) 100%);
+  backdrop-filter: var(--blur-chip); -webkit-backdrop-filter: var(--blur-chip);
+  box-shadow: var(--shadow-sheet), 0 0 46px -12px rgba(255, 179, 0, 0.7);
+  animation: rise var(--dur-slow) var(--ease-out);
+}
+.banner .txt { font-size: 13px; }
+.banner .txt b { display: block; font-size: 14px; }
+.banner .txt span { color: #e8d9b4; }
+
+/* toasts — small tier-2 chips, bottom-right */
+.toasts { position: fixed; right: var(--sp-3); bottom: var(--sp-3); z-index: 7; display: flex; flex-direction: column-reverse; gap: 8px; }
+.toast {
+  padding: 10px 13px; border-radius: var(--radius-sm); font-size: 12px; max-width: 46ch;
+  background: linear-gradient(158deg, rgba(40, 27, 68, 0.94), rgba(20, 13, 36, 0.95));
+  backdrop-filter: var(--blur-chip); box-shadow: var(--shadow-sheet);
+  animation: rise var(--dur) var(--ease-out);
+}
+.toast.error { background: linear-gradient(158deg, rgba(70, 22, 34, 0.94), rgba(34, 12, 20, 0.95)); }
+
+.mono { font-family: var(--mono); }
+.small { font-size: 12px; }
+.mt-2 { margin-top: var(--sp-2); }
+.spacer-2 { height: var(--sp-2); }
+.muted { color: var(--muted); }
+.big-state { font-size: 20px; font-weight: 700; letter-spacing: 0.01em; }
+.state-line { display: flex; align-items: baseline; gap: var(--sp-1); margin-bottom: var(--sp-2); }
+
+/* Reduced motion is non-negotiable: field frozen, sheens off, no springs. */
+@media (prefers-reduced-motion: reduce) {
+  .nebula, .stars, .chip .dot { animation: none !important; }
+  .card::after { display: none; }
+  *, *::before, *::after {
+    animation-duration: 1ms !important; animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

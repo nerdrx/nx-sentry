@@ -1,0 +1,35 @@
+{
+  "name": "nx-sentry",
+  "productName": "NX Sentry",
+  "version": "0.1.0",
+  "description": "Watches a rectangle of your screen and sounds an alarm when something moves in it",
+  "main": "src/main/index.js",
+  "type": "module",
+  "author": "nerdrx",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.js",
+    "headless": "bash scripts/headless_test.sh",
+    "dist:linux": "electron-builder --linux --publish never",
+    "dist:win": "electron-builder --win --publish never"
+  },
+  "devDependencies": {
+    "electron": "^40.4.1"
+  },
+  "build": {
+    "appId": "com.nxsentry.app",
+    "productName": "NX Sentry",
+    "directories": { "output": "dist" },
+    "files": ["src/**/*", "assets/**/*", "package.json", "!test/**/*", "!dist/**/*"],
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Utility",
+      "icon": "assets/icon.png"
+    },
+    "win": {
+      "target": ["portable"],
+      "icon": "assets/icon.png"
+    }
+  }
+}

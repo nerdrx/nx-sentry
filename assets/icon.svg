@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- NX Sentry master mark (≥48px): beveled glass crystal, pointy-top hexagon,
+       with the sentry's aperture watching a rectangle. Light from upper-left. -->
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b98cff"/>
+      <stop offset="0.38" stop-color="#7700ff"/>
+      <stop offset="1" stop-color="#28085a"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f3ebff" stop-opacity="0.9"/>
+      <stop offset="0.45" stop-color="#9a3cff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.5"/>
+    </linearGradient>
+    <linearGradient id="facet" x1="0" y1="0" x2="0.6" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.30"/>
+      <stop offset="0.6" stop-color="#ffffff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.52" r="0.5">
+      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <path d="M256 10 469 133v246L256 502 43 379V133Z" fill="url(#body)" stroke="url(#edge)" stroke-width="10"/>
+  <!-- upper-left facet: the single light source -->
+  <path d="M256 10 469 133 256 256 43 133Z" fill="url(#facet)"/>
+  <!-- inner well -->
+  <path d="M256 62 424 159v194L256 450 88 353V159Z" fill="none" stroke="#efeaff" stroke-opacity="0.16" stroke-width="7"/>
+
+  <circle cx="256" cy="262" r="150" fill="url(#glow)"/>
+  <!-- the watched rectangle -->
+  <rect x="150" y="186" width="212" height="152" rx="6" fill="none" stroke="#efeaff" stroke-opacity="0.55" stroke-width="9" stroke-dasharray="46 30"/>
+  <!-- the aperture -->
+  <circle cx="256" cy="262" r="60" fill="none" stroke="#efeaff" stroke-width="18"/>
+  <circle cx="256" cy="262" r="24" fill="#00e5ff"/>
+</svg>
