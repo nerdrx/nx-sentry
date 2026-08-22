@@ -1,0 +1,35 @@
+<!doctype html>
+<meta charset="utf-8">
+<body><pre id="out">rendering…</pre>
+<script type="module">
+import { BARS, SOUNDS, Alarm } from '../../src/renderer/alarm.js';
+const lines = [];
+const peakOf = (buf) => {
+  const d = buf.getChannelData(0);
+  let peak = 0, rms = 0;
+  for (let i = 0; i < d.length; i++) { const a = Math.abs(d[i]); if (a > peak) peak = a; rms += d[i] * d[i]; }
+  return { peak, rms: Math.sqrt(rms / d.length) };
+};
+for (const name of SOUNDS) {
+  const ctx = new OfflineAudioContext(1, 44100 * 3, 44100);
+  const master = ctx.createGain();
+  master.gain.value = 0.6;
+  const soften = ctx.createBiquadFilter();
+  soften.type = 'lowpass';
+  soften.frequency.value = 5200;
+  master.connect(soften).connect(ctx.destination);
+  const seconds = BARS[name](ctx, master, ctx.currentTime + 0.02);
+  const buf = await ctx.startRendering();
+  const { peak, rms } = peakOf(buf);
+  lines.push(`BAR ${name}: bar=${seconds}s peak=${peak.toFixed(4)} rms=${rms.toFixed(4)}`);
+}
+// And the real object, through its own graph, on a live context.
+const a = new Alarm();
+const ctx = a.ensure();
+lines.push(`LIVE ctx=${ctx ? ctx.state : 'null'} sampleRate=${ctx ? ctx.sampleRate : '-'}`);
+const check = await a.check('beep', 1);
+lines.push(`CHECK ${JSON.stringify(check)}`);
+lines.push(`READY ${a.ready}`);
+document.getElementById('out').textContent = lines.join('\n');
+console.log('PROBE\n' + lines.join('\n'));
+</script>

@@ -155,7 +155,12 @@
           <label class="toggle"><input type="checkbox" id="tFlash" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Flash the window in the taskbar</label>
           <label class="toggle"><input type="checkbox" id="tTray" /><span class="box"><svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 5l2.6 2.6L9 2" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span> Closing the window keeps it watching in the tray</label>
           <hr class="hairline" />
-          <div class="row"><button id="btnTest">Test the alarm</button><span class="muted small">Press Esc to silence a live alarm.</span></div>
+          <div class="row">
+            <button id="btnTest">Test the alarm</button>
+            <button id="btnCheck">Sound check</button>
+            <span class="muted small">Press Esc to silence a live alarm.</span>
+          </div>
+          <p class="hint" id="soundHint"></p>
         </section>
 
       </div>

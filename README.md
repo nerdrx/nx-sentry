@@ -80,6 +80,17 @@ do both without opening the window.
 | **Quiet time** | How long the sentry stays silent after an alarm before it can fire again. |
 | **Samples per second** | 8/s is plenty and costs almost nothing. Raise it for fast motion, lower it on a laptop battery. |
 
+### If you cannot hear the alarm
+
+Press **Sound check** in the Alarm panel. It plays one bar and measures what
+actually came out of the audio graph, then tells you which of the three silent
+failures you have: a suspended audio engine (click the window once), a graph
+that produced no signal (the app's own level in the system volume mixer), or
+sound that is working and going to a device you are not listening to (the system
+default output). The app also warns you the moment an alarm fires while its
+audio engine cannot sound, rather than looking like it is watching when it has
+gone mute.
+
 If your own mouse pointer keeps tripping it, the capture includes the cursor:
 either lower the sensitivity, or draw the area somewhere the pointer does not go.
 

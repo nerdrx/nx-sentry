@@ -8,7 +8,7 @@
 
 export const SOUNDS = ['siren', 'beep', 'pulse', 'chime'];
 
-const BARS = {
+export const BARS = {
   // Rising/falling two-tone sweep — the classic "something is wrong" sound.
   siren(ctx, out, t0) {
     const osc = ctx.createOscillator();
@@ -164,6 +164,59 @@ export class Alarm {
     };
     schedule();
     return true;
+  }
+
+  /**
+   * Play one bar and MEASURE what actually came out of the graph, by tapping
+   * the master with an analyser. An alarm you cannot hear is the one failure
+   * this app must never sit quietly on, and "did the code run" is not the same
+   * question as "did sound come out" — a suspended context, a muted stream or a
+   * dead output device all run the code perfectly and produce silence.
+   */
+  async check(sound, volume) {
+    const ctx = this.ensure();
+    if (!ctx) return { ok: false, reason: 'no-audio', state: 'none', peak: 0 };
+    if (ctx.state !== 'running') {
+      try {
+        await ctx.resume();
+      } catch {
+        /* reported below via state */
+      }
+    }
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    // The master still feeds the real output; the analyser is a second branch
+    // off it, so this measures the same signal the speakers get.
+    this.master.connect(analyser);
+    const buf = new Float32Array(analyser.fftSize);
+    let peak = 0;
+    this.start(sound, { volume, durationMs: 900 });
+    const until = performance.now() + 1000;
+    while (performance.now() < until) {
+      await new Promise((r) => setTimeout(r, 40));
+      analyser.getFloatTimeDomainData(buf);
+      for (let i = 0; i < buf.length; i++) {
+        const a = Math.abs(buf[i]);
+        if (a > peak) peak = a;
+      }
+    }
+    try {
+      this.master.disconnect(analyser);
+    } catch {
+      /* already gone */
+    }
+    return {
+      ok: ctx.state === 'running' && peak > 0.01,
+      reason: ctx.state !== 'running' ? 'suspended' : peak > 0.01 ? 'ok' : 'silent',
+      state: ctx.state,
+      peak: Number(peak.toFixed(3)),
+      sampleRate: ctx.sampleRate,
+    };
+  }
+
+  /** Is the audio graph in a state that can actually make noise right now? */
+  get ready() {
+    return !!this.ctx && this.ctx.state === 'running';
   }
 
   /** One bar, for the "test the alarm" button. */

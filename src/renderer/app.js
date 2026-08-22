@@ -272,6 +272,11 @@ function onMotion(snap, diff) {
     durationMs: settings.alarmMs,
     hold: settings.holdUntilDismissed,
   });
+  if (!alarm.ready) {
+    // Firing silently is the worst failure this app has. Say so, every time,
+    // rather than letting a muted sentry look like a working one.
+    toast('Motion detected, but the alarm could not sound — run the sound check in the Alarm panel.', 'error');
+  }
   const share = (diff.ratio * 100).toFixed(2);
   api.alert({
     title: 'Motion detected',
@@ -644,6 +649,7 @@ function bindControls() {
   }
 
   $('btnTest').addEventListener('click', () => alarm.test(settings.alarmSound, settings.alarmVolume));
+  $('btnCheck').addEventListener('click', soundCheck);
   $('btnSource').addEventListener('click', pickSource);
   $('btnSourceEmpty').addEventListener('click', pickSource);
   $('btnTray').addEventListener('click', () => api.hideWindow());
@@ -672,6 +678,35 @@ function bindControls() {
     else if (cmd === 'disarm') disarm();
     else if (cmd === 'dismiss') dismiss();
   });
+}
+
+/**
+ * Play one bar and report what actually left the audio graph. Every failure
+ * here is silent by nature, so each one gets a sentence saying what to do:
+ * a suspended context needs a click, a silent graph at a running context is the
+ * system's output routing, not ours.
+ */
+async function soundCheck() {
+  const btn = $('btnCheck');
+  btn.disabled = true;
+  $('soundHint').textContent = 'Playing a test tone and listening to the output…';
+  $('soundHint').classList.remove('warn');
+  try {
+    const r = await alarm.check(settings.alarmSound, settings.alarmVolume);
+    const warn = !r.ok;
+    $('soundHint').classList.toggle('warn', warn);
+    $('soundHint').textContent =
+      r.reason === 'ok'
+        ? `Sound is working — peak ${r.peak} at ${Math.round(r.sampleRate / 1000)}kHz. If you did not hear it, check which output device is the system default and the app's own level in the volume mixer.`
+        : r.reason === 'suspended'
+          ? 'The browser audio engine is suspended, so alarms are silent. Click anywhere in this window, then run the check again.'
+          : r.reason === 'no-audio'
+            ? 'This build could not create an audio engine at all, so alarms cannot sound. Desktop notifications still work.'
+            : `The alarm ran but produced no signal (peak ${r.peak}). Raise the alarm volume, or check the app's level in the system volume mixer.`;
+    if (warn) toast('Sound check failed — see the alarm panel.', 'error');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function showSensHint() {
@@ -755,6 +790,16 @@ async function boot() {
   paint(gate.update(0, performance.now()), { ratio: 0, bbox: null }, null);
 
   alarm.onError = (err) => toast(`The alarm could not play — ${err.message}`, 'error');
+
+  // Warm the audio engine on the first interaction of any kind. A browser audio
+  // context created outside a user gesture can come up suspended and stay that
+  // way, which turns every later alarm into silence — and an alarm app that is
+  // silently mute is worse than one that never started. Any click or key press
+  // in the window is enough, and after that the graph is ready before it is
+  // ever needed.
+  const warm = () => alarm.ensure();
+  document.addEventListener('pointerdown', warm, { once: true });
+  document.addEventListener('keydown', warm, { once: true });
   if (info.mock) {
     // Headless runs go straight to the fake desktop, and NX_SENTRY_AUTOARM=1
     // additionally arms the sentry so a screenshot can show the live states.
