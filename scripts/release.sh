@@ -16,6 +16,14 @@ DRY=0
 
 VERSION=$(node -p "require('./package.json').version")
 TAG="v$VERSION"
+HEAD_SHA=$(git rev-parse HEAD)
+
+# gh tags whatever the remote default branch points at, so an unpushed commit
+# would ship assets built from code the tag does not contain. Refuse instead.
+if [[ $DRY -eq 0 ]] && ! git branch -r --contains "$HEAD_SHA" 2>/dev/null | grep -q .; then
+    echo "HEAD is not pushed — push before releasing so the tag matches the build"
+    exit 1
+fi
 
 echo "==> building $TAG"
 npx --no-install electron-builder --linux --publish never
@@ -43,4 +51,4 @@ printf '  %s\n' "${ASSETS[@]}"
 [[ $DRY -eq 1 ]] && { echo "==> dry run, not publishing"; exit 0; }
 
 echo "==> publishing $TAG"
-gh release create "$TAG" "${ASSETS[@]}" --title "NX Sentry $VERSION" --notes-file "${NOTES:-/dev/stdin}"
+gh release create "$TAG" "${ASSETS[@]}" --target "$HEAD_SHA" --title "NX Sentry $VERSION" --notes-file "${NOTES:-/dev/stdin}"
