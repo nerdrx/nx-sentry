@@ -34,7 +34,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-ELECTRON=node_modules/electron/dist/electron
+# $ELECTRON lets the same harness drive a packaged build:
+#   ELECTRON=dist/linux-unpacked/nx-sentry scripts/headless_test.sh
+# A packaged binary already knows its app directory, so the "." argument is only
+# passed to the bare electron runner.
+ELECTRON=${ELECTRON:-node_modules/electron/dist/electron}
 
 command -v gamescope    >/dev/null || { echo "gamescope not installed"; exit 1; }
 command -v gamescopectl >/dev/null || { echo "gamescopectl not installed"; exit 1; }
@@ -46,7 +50,8 @@ GS_ARGS=(--backend headless -W "$W" -H "$H" -w "$W" -h "$H")
 
 # Electron in a nested headless compositor: no sandbox (no user namespaces here)
 # and software GL, since gamescope's headless backend exposes no real device.
-APP_ARGS=(. --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage)
+APP_ARGS=(--no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage)
+[[ $ELECTRON == *"/electron" ]] && APP_ARGS=(. "${APP_ARGS[@]}")
 if [[ $EXPOSE -eq 1 ]]; then
     GS_ARGS+=(--expose-wayland)
     APP_ARGS+=(--ozone-platform=wayland --enable-features=UseOzonePlatform)
