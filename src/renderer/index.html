@@ -114,6 +114,19 @@
             <span id="meterNow">0.00% moving</span>
             <span id="meterTrip">trips at 0.35%</span>
           </div>
+          <hr class="hairline" />
+          <div class="last-shot-head">
+            <span class="micro">Last trigger</span>
+            <span class="muted mono small" id="lastShotAge"></span>
+          </div>
+          <button class="last-shot" id="lastShot" hidden title="Open the trigger viewer">
+            <img id="lastShotImg" alt="The watched area at the moment of the last trigger" />
+            <span class="last-shot-cap">
+              <b class="mono" id="lastShotTime">--:--:--</b>
+              <span class="muted" id="lastShotDetail"></span>
+            </span>
+          </button>
+          <p class="hint small" id="lastShotEmpty">Nothing has tripped it yet. The last trigger shows up here, with what moved outlined.</p>
         </section>
 
         <section class="card">

@@ -55,9 +55,11 @@ pixel.*
   watched rectangle around them, and the percentage is measured against what is
   actually being watched rather than the whole rectangle.
 - **See what tripped it.** Every trigger keeps a picture of the watched area
-  with the moving part outlined and the ignored parts marked. Click any event to
-  open the viewer, step through with the arrow keys, or play them as a
-  slideshow. Optionally they are written to disk as JPEGs too.
+  with the moving part outlined and the ignored parts marked. The most recent
+  one sits beside the meter at full size — glance at the window and you have
+  already answered "what moved?" — and clicking it opens the viewer, where the
+  arrow keys step through the history and Play runs it as a slideshow.
+  Optionally they are written to disk as JPEGs too.
 - **Not scream at every flicker.** A grace period after arming, a
   frames-in-a-row requirement before it fires, and a quiet time after each
   alarm, so a compression artefact or your own mouse leaving the room does not

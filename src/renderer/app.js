@@ -369,6 +369,7 @@ function takeSnapshot(diff, dims) {
   snaps.unshift(snap);
   while (snaps.length > settings.keepSnapshots) snaps.pop();
   $('btnSlideshow').disabled = !snaps.length;
+  showLastShot();
   if (settings.saveSnapshots) {
     api.snapshots
       .save({ dataUrl, stamp: `${stampDate(at)}_${hhmmss(at).replace(/:/g, '-')}` })
@@ -378,6 +379,50 @@ function takeSnapshot(diff, dims) {
 }
 
 const stampDate = (d) => `${d.getFullYear()}-${two(d.getMonth() + 1)}-${two(d.getDate())}`;
+
+/**
+ * Put the newest snapshot beside the state and the meter.
+ *
+ * The event list answers "what has been happening"; this answers "what just
+ * happened", which is the question you actually have when you glance at the
+ * window — and the list lives below the fold on most window sizes, so an answer
+ * that needs scrolling is not an answer.
+ */
+function showLastShot() {
+  const s2 = snaps[0];
+  const shot = $('lastShot');
+  if (!s2) {
+    shot.hidden = true;
+    $('lastShotEmpty').hidden = false;
+    $('lastShotAge').textContent = '';
+    return;
+  }
+  $('lastShotImg').src = s2.dataUrl;
+  $('lastShotTime').textContent = hhmmss(s2.at);
+  $('lastShotDetail').textContent = `${s2.changed} px moved · ${(s2.ratio * 100).toFixed(2)}% of the area`;
+  shot.hidden = false;
+  $('lastShotEmpty').hidden = true;
+  updateShotAge();
+}
+
+/**
+ * "12:04:31" tells you when; "4s ago" tells you whether it is still happening.
+ * Driven from paint(), so it costs one string compare per sample and no timer
+ * of its own.
+ */
+let lastAgeText = '';
+function updateShotAge() {
+  const s2 = snaps[0];
+  if (!s2) return;
+  const secs = Math.max(0, Math.round((Date.now() - s2.at.getTime()) / 1000));
+  const text =
+    secs < 60 ? `${secs}s ago`
+    : secs < 3600 ? `${Math.floor(secs / 60)}m ago`
+    : `${Math.floor(secs / 3600)}h ago`;
+  if (text === lastAgeText) return;
+  lastAgeText = text;
+  $('lastShotAge').textContent = text;
+}
 
 // --- the viewer -------------------------------------------------------------
 
@@ -560,6 +605,7 @@ function paint(snap, diff, dims) {
   region.classList.toggle('hit', snap.alarming);
 
   if (dims && diff.bbox && snap.armed) showBlob(diff.bbox, dims);
+  updateShotAge();
   if (dims) showAnalysisHint();
   if (state !== STATE.ALARM) {
     if (alarm.playing) alarm.stop();
@@ -1198,6 +1244,7 @@ function bindControls() {
     layoutExclusions();
   });
   $('btnSlideshow').addEventListener('click', () => openViewer(0));
+  $('lastShot').addEventListener('click', () => openViewer(0));
 
   $('btnCentre').addEventListener('click', () => {
     patch({ region: { x: 1 / 3, y: 1 / 3, w: 1 / 3, h: 1 / 3 } }, { immediate: true });

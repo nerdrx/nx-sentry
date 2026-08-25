@@ -476,3 +476,32 @@ select option { background: #171028; color: var(--text); }
   aspect-ratio: 16 / 10; display: grid; place-items: center;
   background: var(--well-deep); color: var(--violet-soft);
 }
+
+/* ------------------------------------------------------- the last trigger -- */
+/* The answer to "what just moved?" belongs where the eye already is — beside
+   the state and the meter — not below the fold in the event list. */
+.last-shot-head { display: flex; align-items: baseline; gap: var(--sp-1); margin-bottom: var(--sp-1); }
+.micro {
+  font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--muted);
+}
+.last-shot-head .mono { margin-left: auto; }
+
+.last-shot {
+  display: block; width: 100%; padding: 0; overflow: hidden;
+  background: var(--well-deep); border-radius: var(--radius-sm);
+  text-align: left; position: relative;
+}
+.last-shot::before { content: none; }        /* the well is recessed, not lit */
+.last-shot:hover { transform: none; background: var(--well-deep); }
+.last-shot:hover img { transform: scale(1.015); }
+.last-shot img {
+  display: block; width: 100%; max-height: 260px; object-fit: contain;
+  background: #05030c;
+  transition: transform var(--dur) var(--ease-soft);
+}
+.last-shot-cap {
+  display: flex; align-items: baseline; gap: var(--sp-1);
+  padding: 8px 10px; font-size: 12px;
+}
+.last-shot-cap b { color: var(--cyan); }
